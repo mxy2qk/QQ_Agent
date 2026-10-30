@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "qq-personal-agent"
+version = "0.1.0"
+description = "DeepSeek + LangGraph personal agent, CLI first"
+requires-python = ">=3.11"
+dependencies = [
+  "openai>=1.60,<3",
+  "langgraph>=1.0,<2",
+  "langchain-core>=1.0,<2",
+  "pydantic-settings>=2.7,<3",
+  "tzdata>=2025.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10", "pytest-asyncio>=1,<2", "ruff>=0.11,<1"]
+
+[project.scripts]
+qq-agent = "qq_agent.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/qq_agent"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = ["live: opt-in requests to the configured DeepSeek API"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100

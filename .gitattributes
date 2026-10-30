@@ -1,0 +1,9 @@
+# Normalize text in the repository and working tree across Windows/Linux.
+* text=auto
+*.py text eol=lf
+*.toml text eol=lf
+*.lock text eol=lf
+*.md text eol=lf
+*.example text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
