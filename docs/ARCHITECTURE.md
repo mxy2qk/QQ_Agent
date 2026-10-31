@@ -24,6 +24,7 @@ CLI Adapter → IncomingMessage → AgentService → LangGraph
 - `skills.py` / `skill_specs/`：元数据发现校验、意图匹配、按需读取受信任说明与工具白名单。
 - `public_sources.py`：固定平台 HTTPS 只读适配、Schema、来源解析、限速缓存与失败边界；客户端随 CLI 退出关闭。
 - `channels/base.py` / `channels/onebot.py`：OneBot 正向 WS、可信事件规范化、白名单/@过滤、受控回复路由、动作ACK、去重与重连。渠道不拼装Prompt，也不直接调用模型SDK。
+- `runtime.py` / 根目录管理脚本：Windows 本地进程管理、后台守护、有限退出重试、协作停止和脱敏状态。工作进程仍复用CLI服务入口，不增加QQ指令或发送权限。
 
 QQ群回复的 IncomingMessage.public_response=true，SQL只检索group记忆，防止成员自己的private/global记忆随群回复公开。私聊和CLI模拟仍按原身份隔离。qq_deliveries仅保存事件键和投递状态，采用最多一次发送尝试；不能把平台ACK超时当作未送达并自动重发。模型不持有发送接口，收件人始终由已校验事件决定。
 

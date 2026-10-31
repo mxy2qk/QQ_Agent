@@ -6,6 +6,8 @@
 
 按 [官方 Shell 安装说明](https://napneko.github.io/guide/boot/Shell)下载安装。当前根目录启动脚本指向 `napcat/v4.18.42/launcher.bat`；更新版本时同步修改脚本路径。本仓库不分发 NapCat、QQ 或登录数据。
 
+配置完成后，Windows 日常启动、停止、重启和查看状态可使用根目录的四个中文脚本，详见 [运行管理](RUNTIME.md)。后台守护只负责 Agent 异常退出恢复；NapCat 登录仍需本人完成。
+
 在 NapCat 中创建 WebSocket **服务端（正向 WS）**，监听 `127.0.0.1:3001`，消息格式选 `array`，设置强令牌并启用。根路径 `/` 同时支持事件和动作；不是 WebUI 管理端口，也不是 `/api` 或 `/event` 单功能路径。
 
 ## 本地配置

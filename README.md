@@ -48,6 +48,8 @@ Copy-Item .env.example .env
 
 QQ 配置见 [QQ_SETUP](docs/QQ_SETUP.md)。本机已安装 NapCat 时，可用根目录 `start-napcat.cmd` 启动；新的仓库副本不包含 NapCat 二进制或登录数据，需自行安装到相应目录。
 
+Windows 日常使用可直接双击 `启动机器人.cmd`、`停止机器人.cmd`、`重启机器人.cmd`、`查看状态.cmd`。启动后由后台守护程序负责 Agent 异常退出重试，连续失败会暂停；停止/重启不关闭 NapCat。使用说明见 [运行管理](docs/RUNTIME.md)。不包含开机自启。
+
 同一数据库只允许一个 Agent 进程。`--data-dir PATH` 可隔离测试数据；demo 默认使用 `data/demo`。不要与正在运行的 QQ Agent 同时使用默认数据库启动另一 CLI。
 
 ## 记忆命令
@@ -88,7 +90,7 @@ pyproject.toml    项目配置
 uv.lock           依赖锁文件
 ```
 
-本地运行所需的 `.env`、`.venv/`、`data/`、`logs/`、`napcat/` 不上传。当前运行进程信息保存在 `data/run/qq-agent-process.json`；不要删除正在使用的数据库或 NapCat。
+本地运行所需的 `.env`、`.venv/`、`data/`、`logs/`、`napcat/` 不上传。管理脚本的当前运行信息保存在 `data/run/runtime.json` 和 `runtime-worker.json`；不要删除正在使用的控制文件、数据库或 NapCat。
 
 ## 开发验证
 

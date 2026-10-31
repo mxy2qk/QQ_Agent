@@ -25,9 +25,13 @@ async def verify_live(client):
     print("真实 API 验证通过：普通文本请求。")
 
 
-async def run(args):
+async def run(args, log_handler=None):
     settings = Settings()
     setup_logging(settings.log_level)
+    if log_handler is not None:
+        import logging
+
+        logging.getLogger("qq_agent").addHandler(log_handler)
     client = (
         DemoClient()
         if args.demo or args.list_skills or args.verify_sources
