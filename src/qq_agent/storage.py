@@ -59,6 +59,8 @@ CREATE TABLE IF NOT EXISTS memory_sources (
  source_user_id TEXT NOT NULL, source_message_id TEXT NOT NULL,
  event TEXT NOT NULL, created_at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS purge_queue (thread_id TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS reply_style_settings (
+ id INTEGER PRIMARY KEY CHECK(id=1),content TEXT NOT NULL,updated_at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS group_context_messages (
  platform TEXT NOT NULL,chat_id TEXT NOT NULL,user_id TEXT NOT NULL,message_id TEXT NOT NULL,
  nickname TEXT,content TEXT NOT NULL,created_at REAL NOT NULL,tombstone INTEGER NOT NULL DEFAULT 0,
@@ -84,7 +86,7 @@ CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
  INSERT INTO messages_fts(rowid,content) VALUES(new.id,new.content); END;
 CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
  DELETE FROM messages_fts WHERE rowid=old.id; END;
-PRAGMA user_version=2;
+PRAGMA user_version=3;
 """
 
 
@@ -97,13 +99,31 @@ class Database:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA secure_delete=ON")
         version = self.conn.execute("PRAGMA user_version").fetchone()[0]
-        if version > 2:
+        if version > 3:
             self.conn.close()
             raise ValueError("数据库版本较新，请升级程序")
         self.conn.executescript(SCHEMA)
 
     def close(self):
         self.conn.close()
+
+    def reply_style(self):
+        row = self.conn.execute("SELECT content FROM reply_style_settings WHERE id=1").fetchone()
+        return row[0] if row else None
+
+    def complete_style(self, actor, result, reply):
+        # Style change and duplicate receipt are committed together. A replay of
+        # an older command must never roll back a more recent global style.
+        with self.transaction() as db:
+            if result.reset:
+                db.execute("DELETE FROM reply_style_settings WHERE id=1")
+            elif result.value is not None:
+                db.execute(
+                    "INSERT INTO reply_style_settings VALUES(1,?,?) ON CONFLICT(id) DO UPDATE "
+                    "SET content=excluded.content,updated_at=excluded.updated_at",
+                    (result.value, time.time()),
+                )
+            self.complete(actor, self.turns(actor), reply)
 
     @staticmethod
     def _group_allowed(actor, groups, users):

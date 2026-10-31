@@ -15,6 +15,7 @@ from qq_agent.memory import MemoryManager, memory_context
 from qq_agent.messages import IncomingMessage
 from qq_agent.model import LLMClient, is_interruption_marker
 from qq_agent.observability import request_context
+from qq_agent.style import DEFAULT_STYLE, is_style_command, reply_style_context, style_command
 from qq_agent.tools import ToolRegistry
 
 logger = logging.getLogger("qq_agent")
@@ -62,6 +63,7 @@ class AgentService:
             skill_manager,
         )
         self.sessions: dict[str, Session] = {}
+        self.ephemeral_style = DEFAULT_STYLE
 
     async def handle(self, message: IncomingMessage):
         token = request_context.set(
@@ -75,6 +77,7 @@ class AgentService:
         )
         memory_token = memory_context.set(None)
         conversation_token = conversation_context.set(None)
+        style_token = reply_style_context.set(None)
         try:
             async with asyncio.timeout(self.settings.agent_timeout_seconds):
                 if self.persistence:
@@ -92,6 +95,7 @@ class AgentService:
             )
             return AgentReply("本次请求失败，请检查配置或查看日志中的错误类型", "error")
         finally:
+            reply_style_context.reset(style_token)
             conversation_context.reset(conversation_token)
             memory_context.reset(memory_token)
             request_context.reset(token)
@@ -121,6 +125,8 @@ class AgentService:
                     if len(session.replies) > 256:
                         session.replies.popitem(last=False)
                 return AgentReply(help_text, "ok")
+            if is_style_command(message.text):
+                return self._handle_style(message, session)
             if self.database:
                 cached = self.database.reply(message)
                 if cached:
@@ -182,6 +188,12 @@ class AgentService:
                 )
             ]
             history = [m for turn in session.turns for m in turn]
+            current_style = (
+                (self.database.reply_style() or DEFAULT_STYLE)
+                if self.database
+                else self.ephemeral_style
+            )
+            reply_style_context.set(current_style)
             user_message = {"role": "user", "content": message.text}
             config = {
                 "recursion_limit": self.settings.max_agent_steps * 3 + 10,
@@ -234,6 +246,51 @@ class AgentService:
                 },
             )
             return reply
+
+    def _handle_style(self, message, session):
+        allowed = message.platform == "cli" or (
+            message.platform == "qq"
+            and (
+                (
+                    message.chat_type == "group"
+                    and message.chat_id in self.settings.qq_allowed_groups
+                    and message.is_mentioned
+                )
+                or (
+                    message.chat_type == "private"
+                    and self.settings.qq_private_enabled
+                    and message.user_id in self.settings.qq_allowed_users
+                )
+            )
+        )
+        if not allowed:
+            return AgentReply("请在授权群内@机器人使用 /style，或通过授权好友私聊操作。", "error")
+        cached = (
+            self.database.reply(message)
+            if self.database
+            else session.replies.get(message.message_id)
+        )
+        if cached:
+            return AgentReply(**cached) if self.database else cached
+        current = (
+            (self.database.reply_style() or DEFAULT_STYLE)
+            if self.database
+            else self.ephemeral_style
+        )
+        result = style_command(message.text, current)
+        reply = AgentReply(result.reply, "ok")
+        if self.database:
+            self.database.touch(message)
+            self.database.complete_style(message, result, asdict(reply))
+        else:
+            if result.reset:
+                self.ephemeral_style = DEFAULT_STYLE
+            elif result.value is not None:
+                self.ephemeral_style = result.value
+            session.replies[message.message_id] = reply
+            if len(session.replies) > 256:
+                session.replies.popitem(last=False)
+        return reply
 
     async def observe_group(self, message):
         if not self.persistence or not self.settings.qq_group_context_enabled:

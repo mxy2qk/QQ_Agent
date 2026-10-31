@@ -17,6 +17,7 @@ from qq_agent.model import (
     ToolCall,
     is_interruption_marker,
 )
+from qq_agent.style import reply_style_context, style_prompt
 from qq_agent.tools import ToolExecutor, ToolRegistry
 
 logger = logging.getLogger("qq_agent")
@@ -110,7 +111,12 @@ def build_graph(
                 schemas = [s for s in schemas if s["function"]["name"] in allowed]
             response = await client.generate(
                 [
-                    {"role": "system", "content": SYSTEM_PROMPT + skill_prompt},
+                    {
+                        "role": "system",
+                        "content": SYSTEM_PROMPT
+                        + skill_prompt
+                        + style_prompt(reply_style_context.get()),
+                    },
                     *context,
                     *state["messages"],
                 ],

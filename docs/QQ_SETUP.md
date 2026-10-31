@@ -31,6 +31,8 @@ QQ_LIVE_ENABLED=false
 
 `QQ_ALLOWED_GROUP_USERS` 是额外的群成员过滤：为空时允许白名单群内所有成员的实际@消息，填写后只允许指定成员。它不授予私聊权限；私聊仍由 `QQ_ALLOWED_USERS` 单独控制。如仅使用群聊，设置 `QQ_PRIVATE_ENABLED=false`，并可清空 `QQ_ALLOWED_USERS`。修改群白名单直接替换 `QQ_ALLOWED_GROUPS`，不要追加已停用测试群；重启 Agent 后生效。真实群号和成员QQ号只填写本地 `.env`。
 
+使用者已授权白名单群的所有成员通过实际@使用 `/style` 查看、修改和恢复全局回复风格，这是群成员过滤的唯一命令例外；未放开他们的普通聊天、其他命令或群摘录。私聊仍按好友白名单。详见 [全局回复风格](REPLY_STYLE.md)。
+
 ## 启用与验证
 
 先登录 NapCat，并确认授权与告知，再将 `QQ_LIVE_ENABLED=true`。关闭占用同一数据库的其他 Agent 后执行：

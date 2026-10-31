@@ -358,7 +358,7 @@ def test_schema_reopen_and_foreign_key_integrity(tmp_path):
     db.close()
     db = Database(path)
     try:
-        assert db.conn.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert db.conn.execute("PRAGMA user_version").fetchone()[0] == 3
         assert db.conn.execute("PRAGMA foreign_key_check").fetchall() == []
         assert db.conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert db.visible(actor())[0]["content"] == "学习 LangGraph"

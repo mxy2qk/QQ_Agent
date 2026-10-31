@@ -11,6 +11,7 @@ from pydantic import ValidationError
 from websockets.asyncio.client import connect
 
 from qq_agent.messages import GroupMember, IncomingMessage
+from qq_agent.style import is_style_command
 
 logger = logging.getLogger("qq_agent")
 
@@ -132,11 +133,6 @@ class OneBotAdapter:
                 chat = stable_id(event.get("group_id"))
                 if chat not in self.settings.qq_allowed_groups:
                     return None
-                if (
-                    self.settings.qq_allowed_group_users
-                    and user not in self.settings.qq_allowed_group_users
-                ):
-                    return None
             elif kind == "private" and self.settings.qq_private_enabled:
                 if event.get("sub_type") != "friend" or user not in self.settings.qq_allowed_users:
                     return None
@@ -167,6 +163,13 @@ class OneBotAdapter:
             if kind == "group" and not mentioned and not self.settings.qq_group_context_enabled:
                 return None
             content = "".join(pieces).strip()
+            if (
+                kind == "group"
+                and self.settings.qq_allowed_group_users
+                and user not in self.settings.qq_allowed_group_users
+                and not (mentioned and is_style_command(content))
+            ):
+                return None
             if kind == "group" and mentioned and not content:
                 if not all(segment.get("type") in {"text", "at"} for segment in segments):
                     return None

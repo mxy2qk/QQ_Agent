@@ -14,6 +14,12 @@ class Command:
 
 COMMANDS = (
     Command(
+        "style",
+        "/style [show|set 内容|reset]",
+        "查看、修改或恢复全局回复风格",
+        "例如 /style set 话少一点，轻松吐槽。群聊和私聊共用一个风格，立即生效并保存。授权群内任何成员都可@机器人修改；只改变表达风格。/style reset恢复默认群友模式。",
+    ),
+    Command(
         "help",
         "/help [命令名|memory|skills]",
         "查看帮助",
@@ -129,7 +135,7 @@ def command_help(text, message, settings, skill_manager=None, persistent=True):
         item
         for item in COMMANDS
         if item.scope in {"both", scope}
-        and (topic != "memory" or item.name not in {"help", "skill"})
+        and (topic != "memory" or item.name not in {"help", "skill", "style"})
     ]
     title = "群聊操作帮助" if group else "私聊/CLI操作帮助"
     intro = (
