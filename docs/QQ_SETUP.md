@@ -20,12 +20,15 @@ QQ_WS_URL=ws://127.0.0.1:3001/
 QQ_ACCESS_TOKEN=填写与NapCat网络服务相同的令牌
 QQ_SELF_ID=填写机器人QQ号
 QQ_ALLOWED_GROUPS=["填写授权群号"]
+QQ_ALLOWED_GROUP_USERS=[]
 QQ_ALLOWED_USERS=["填写授权好友QQ号"]
 QQ_PRIVATE_ENABLED=true
 QQ_LIVE_ENABLED=false
 ```
 
-白名单用 JSON 字符串数组，空列表不允许任何对应对象。临时会话不处理，私聊双方需为好友。明文 WS 仅允许本机回环，远程使用 WSS。访问令牌与 WebUI 登录令牌是不同配置；不把令牌放在 URL 或提交到 Git。
+白名单用 JSON 字符串数组，`QQ_ALLOWED_GROUPS`、`QQ_ALLOWED_USERS` 为空时不允许任何对应群或私聊用户。临时会话不处理，私聊双方需为好友。明文 WS 仅允许本机回环，远程使用 WSS。访问令牌与 WebUI 登录令牌是不同配置；不把令牌放在 URL 或提交到 Git。
+
+`QQ_ALLOWED_GROUP_USERS` 是额外的群成员过滤：为空时允许白名单群内所有成员的实际@消息，填写后只允许指定成员。它不授予私聊权限；私聊仍由 `QQ_ALLOWED_USERS` 单独控制。如仅使用群聊，设置 `QQ_PRIVATE_ENABLED=false`，并可清空 `QQ_ALLOWED_USERS`。修改群白名单直接替换 `QQ_ALLOWED_GROUPS`，不要追加已停用测试群；重启 Agent 后生效。真实群号和成员QQ号只填写本地 `.env`。
 
 ## 启用与验证
 

@@ -73,6 +73,41 @@ def test_normalize_mentions_identity_and_namespaces(adapter):
     assert private.thread_id != message.thread_id
 
 
+@pytest.mark.parametrize("private_enabled", [False, True])
+def test_group_member_allowlist_and_private_mode(adapter, private_enabled):
+    adapter.settings.qq_allowed_group_users = ["200", "201", "202", "203"]
+    adapter.settings.qq_allowed_users = ["200", "201", "202", "203"]
+    adapter.settings.qq_private_enabled = private_enabled
+    for user in (200, 201, 202, 203):
+        assert adapter.normalize(event(user=user)) is not None
+        assert adapter.normalize(event(user=user, mention=False)) is None
+        assert adapter.normalize(event(user=user, group=999)) is None
+        assert bool(adapter.normalize(event(user=user, private=True))) == private_enabled
+    assert adapter.normalize(event(user=204)) is None
+    assert adapter.normalize(event(user=204, private=True)) is None
+
+
+def test_group_and_private_member_filters_are_independent(adapter):
+    adapter.settings.qq_allowed_group_users = ["201"]
+    assert adapter.normalize(event(user=200)) is None
+    assert adapter.normalize(event(user=201)) is not None
+    assert adapter.normalize(event(user=200, private=True)) is not None
+    assert adapter.normalize(event(user=201, private=True)) is None
+    adapter.settings.qq_allowed_group_users = []
+    assert adapter.normalize(event(user=204)) is not None
+
+
+def test_group_member_allowlist_validation():
+    cfg = settings(
+        qq_allowed_group_users=["not-an-id"],
+        qq_live_enabled=True,
+        qq_ws_url="ws://127.0.0.1:3001/",
+        qq_access_token="local-test-token",
+    )
+    with pytest.raises(ConfigurationError, match="白名单"):
+        cfg.require_qq()
+
+
 @pytest.mark.parametrize(
     "change",
     [

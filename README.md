@@ -50,6 +50,8 @@ QQ 配置见 [QQ_SETUP](docs/QQ_SETUP.md)。本机已安装 NapCat 时，可用�
 
 Windows 日常使用可直接双击 `启动机器人.cmd`、`停止机器人.cmd`、`重启机器人.cmd`、`查看状态.cmd`。启动后由后台守护程序负责 Agent 异常退出重试，连续失败会暂停；停止/重启不关闭 NapCat。使用说明见 [运行管理](docs/RUNTIME.md)。不包含开机自启。
 
+`QQ_ALLOWED_GROUPS` 控制允许的群；可用 `QQ_ALLOWED_GROUP_USERS` 进一步限制群内成员，留空时允许这些群的所有成员。好友私聊由 `QQ_ALLOWED_USERS` 和 `QQ_PRIVATE_ENABLED` 独立控制。真实白名单只填写本地 `.env`，修改后重启 Agent。
+
 同一数据库只允许一个 Agent 进程。`--data-dir PATH` 可隔离测试数据；demo 默认使用 `data/demo`。不要与正在运行的 QQ Agent 同时使用默认数据库启动另一 CLI。
 
 ## 记忆命令

@@ -87,6 +87,11 @@ class OneBotAdapter:
                 chat = stable_id(event.get("group_id"))
                 if chat not in self.settings.qq_allowed_groups:
                     return None
+                if (
+                    self.settings.qq_allowed_group_users
+                    and user not in self.settings.qq_allowed_group_users
+                ):
+                    return None
             elif kind == "private" and self.settings.qq_private_enabled:
                 if event.get("sub_type") != "friend" or user not in self.settings.qq_allowed_users:
                     return None

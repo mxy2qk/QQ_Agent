@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     qq_access_token: SecretStr = SecretStr("")
     qq_self_id: str = ""
     qq_allowed_groups: list[str] = Field(default_factory=list)
+    qq_allowed_group_users: list[str] = Field(default_factory=list)
     qq_allowed_users: list[str] = Field(default_factory=list)
     qq_private_enabled: bool = False
     qq_live_enabled: bool = False
@@ -94,6 +95,10 @@ class Settings(BaseSettings):
             raise ConfigurationError("请配置允许的群或私聊用户白名单")
         if any(
             not x.isdecimal() or int(x) <= 0
-            for x in [*self.qq_allowed_groups, *self.qq_allowed_users]
+            for x in [
+                *self.qq_allowed_groups,
+                *self.qq_allowed_group_users,
+                *self.qq_allowed_users,
+            ]
         ):
             raise ConfigurationError("QQ 白名单必须是正整数 ID 字符串数组")
