@@ -2,12 +2,13 @@ import asyncio
 import json
 
 import pytest
+from helpers import sample_registry
 
 from qq_agent.config import ConfigurationError, Settings
 from qq_agent.messages import IncomingMessage
-from qq_agent.model import ModelError, ModelResponse, ToolCall
+from qq_agent.model import ModelError, ModelInterruptedError, ModelResponse, ToolCall
 from qq_agent.service import AgentService
-from qq_agent.tools import Tool, ToolArguments, ToolExecutor, ToolRegistry, default_registry
+from qq_agent.tools import Tool, ToolArguments, ToolExecutor, ToolRegistry
 
 
 class ScriptedClient:
@@ -38,12 +39,12 @@ def msg(text="你好", mid="1", user="a", chat="g", platform="cli"):
     )
 
 
-def call(name="get_current_time", arguments="{}", cid="time-1"):
+def call(name="test_echo", arguments="{}", cid="echo-1"):
     return ModelResponse(tool_calls=[ToolCall(cid, name, arguments)])
 
 
 def service(client, settings=None, registry=None):
-    return AgentService(client, registry or default_registry(), settings or config())
+    return AgentService(client, registry or sample_registry(), settings or config())
 
 
 async def test_greeting_and_multi_turn_context():
@@ -58,29 +59,28 @@ async def test_greeting_and_multi_turn_context():
     ]
 
 
-async def test_real_time_tool_result_reaches_model():
-    client = ScriptedClient(call(), ModelResponse("上海当前时间如下"))
+async def test_registered_tool_result_reaches_model():
+    client = ScriptedClient(call(), ModelResponse("测试工具结果如下"))
     reply = await service(client).handle(msg("现在几点"))
     assert reply.status == "ok" and reply.tool_calls == 1 and reply.model_steps == 2
     tool = client.requests[1][0][-1]
-    assert tool["role"] == "tool" and tool["tool_call_id"] == "time-1"
+    assert tool["role"] == "tool" and tool["tool_call_id"] == "echo-1"
     result = json.loads(tool["content"])
-    assert result["ok"] and result["data"]["timezone"] == "Asia/Shanghai"
-    assert "+08:00" in result["data"]["datetime"]
+    assert result["ok"] and result["data"]["value"] == "ok"
 
 
 @pytest.mark.parametrize(
     "name,arguments,error",
     [
         ("unregistered", "{}", "unknown_tool"),
-        ("get_current_time", '{"extra":1}', "invalid_arguments"),
-        ("get_current_time", '{"timezone":42}', "invalid_arguments"),
-        ("get_current_time", "not-json", "invalid_arguments"),
-        ("get_current_time", '{"timezone":"Invalid/Zone"}', "tool_failed"),
+        ("test_echo", '{"extra":1}', "invalid_arguments"),
+        ("test_echo", '{"value":42}', "invalid_arguments"),
+        ("test_echo", "not-json", "invalid_arguments"),
+        ("test_echo", '{"value":"invalid"}', "tool_failed"),
     ],
 )
 async def test_tool_rejection_and_schema(name, arguments, error):
-    result = await ToolExecutor(default_registry(), 0.1).execute(ToolCall("t", name, arguments))
+    result = await ToolExecutor(sample_registry(), 0.1).execute(ToolCall("t", name, arguments))
     assert result == {"ok": False, "error": error}
 
 
@@ -122,9 +122,7 @@ async def test_loop_and_tool_budgets_stop_noncompliant_model():
 
 
 async def test_multiple_calls_cannot_exceed_budget():
-    response = ModelResponse(
-        tool_calls=[ToolCall(str(i), "get_current_time", "{}") for i in range(4)]
-    )
+    response = ModelResponse(tool_calls=[ToolCall(str(i), "test_echo", "{}") for i in range(4)])
     client = ScriptedClient(response, ModelResponse("已达工具上限"))
     reply = await service(client, config(max_tool_calls=2)).handle(msg())
     assert reply.tool_calls == 2
@@ -136,7 +134,7 @@ async def test_multiple_calls_cannot_exceed_budget():
 async def test_failure_stops_other_calls():
     client = ScriptedClient(
         ModelResponse(
-            tool_calls=[ToolCall("a", "unknown", "{}"), ToolCall("b", "get_current_time", "{}")]
+            tool_calls=[ToolCall("a", "unknown", "{}"), ToolCall("b", "test_echo", "{}")]
         ),
         ModelResponse("失败"),
     )
@@ -212,9 +210,9 @@ def test_input_validation_and_thread_delimiter_collision():
 
 
 def test_registry_rejects_duplicate_sync_and_side_effect_tools():
-    registry = default_registry()
+    registry = sample_registry()
     with pytest.raises(ValueError, match="重复"):
-        registry.register(registry.get("get_current_time"))
+        registry.register(registry.get("test_echo"))
     with pytest.raises(ValueError, match="async"):
         registry.register(Tool("sync", "test", ToolArguments, dict))
 
@@ -223,3 +221,45 @@ def test_registry_rejects_duplicate_sync_and_side_effect_tools():
 
     with pytest.raises(ValueError, match="副作用"):
         registry.register(Tool("effect", "test", ToolArguments, effect, side_effect=True))
+
+
+async def test_provider_interruption_retries_once_then_tool_round_trip():
+    client = ScriptedClient(ModelResponse("[用户中断]"), call(), ModelResponse("测试结果已返回"))
+    reply = await service(client).handle(msg("现在的北京时间"))
+    assert reply.status == "ok" and reply.model_steps == 3 and reply.tool_calls == 1
+    assert json.loads(client.requests[-1][0][-1]["content"])["ok"]
+    assert "[用户中断]" not in json.dumps(client.requests, ensure_ascii=False)
+
+
+async def test_repeated_interruption_is_clear_error_without_infinite_retry():
+    client = ScriptedClient(ModelInterruptedError(), ModelInterruptedError())
+    reply = await service(client).handle(msg("现在几点"))
+    assert reply.status == "error" and reply.model_steps == 2 and len(client.requests) == 2
+    assert "临时中断" in reply.text and "[用户中断]" not in reply.text
+
+
+async def test_interruption_retry_respects_model_step_budget():
+    client = ScriptedClient(ModelInterruptedError())
+    reply = await service(client, config(max_agent_steps=1)).handle(msg())
+    assert reply.status == "error" and reply.model_steps == 1 and len(client.requests) == 1
+
+
+async def test_interruption_after_tool_does_not_repeat_tool_execution():
+    client = ScriptedClient(call(), ModelResponse("[用户中断]"), ModelResponse("结果已取得"))
+    reply = await service(client).handle(msg("现在几点"))
+    assert reply.status == "ok" and reply.tool_calls == 1 and reply.model_steps == 3
+    assert client.requests[1][0] == client.requests[2][0]
+
+
+async def test_legacy_interruption_text_not_reinjected_as_successful_history():
+    client = ScriptedClient(
+        ModelResponse("[用户中断]"), ModelResponse("[用户中断]"), ModelResponse("你好")
+    )
+    svc = service(client)
+    await svc.handle(msg())
+    # Simulate a saved successful placeholder from the previous release.
+    svc.sessions[msg().thread_id].turns = [
+        [{"role": "user", "content": "旧问题"}, {"role": "assistant", "content": "[用户中断]"}]
+    ]
+    await svc.handle(msg(mid="second"))
+    assert "[用户中断]" not in json.dumps(client.requests[-1], ensure_ascii=False)

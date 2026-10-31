@@ -49,7 +49,7 @@ async def test_sdk_serialization_and_response_normalization():
                                 {
                                     "id": "t",
                                     "type": "function",
-                                    "function": {"name": "get_current_time", "arguments": "{}"},
+                                    "function": {"name": "test_echo", "arguments": "{}"},
                                 }
                             ],
                         },
@@ -62,7 +62,7 @@ async def test_sdk_serialization_and_response_normalization():
     client = client_for(handler)
     try:
         result = await client.generate([{"role": "user", "content": "time"}])
-        assert result.tool_calls[0].name == "get_current_time"
+        assert result.tool_calls[0].name == "test_echo"
         assert result.usage["total_tokens"] == 15
         assert result.as_message()["tool_calls"][0]["id"] == "t"
     finally:
@@ -122,5 +122,34 @@ async def test_sdk_network_timeout_is_sanitized():
         with pytest.raises(ModelError, match="超时") as error:
             await client.generate([{"role": "user", "content": "hi"}])
         assert "test-secret" not in str(error.value)
+    finally:
+        await client.close()
+
+
+@pytest.mark.parametrize("content", ["[用户中断]", "  【用户中断】  ", "[User interrupted]"])
+async def test_provider_interruption_placeholder_is_an_error(content):
+    from qq_agent.model import ModelInterruptedError
+
+    client = client_for(
+        lambda request: httpx.Response(
+            200,
+            json={
+                "id": "r",
+                "object": "chat.completion",
+                "created": 1,
+                "model": "test",
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": {"role": "assistant", "content": content},
+                    }
+                ],
+            },
+        )
+    )
+    try:
+        with pytest.raises(ModelInterruptedError):
+            await client.generate([{"role": "user", "content": "现在几点"}])
     finally:
         await client.close()

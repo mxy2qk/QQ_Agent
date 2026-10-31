@@ -15,6 +15,7 @@ class IncomingMessage(BaseModel):
     text: str = Field(min_length=1, max_length=32000)
     is_mentioned: bool = False
     timestamp: str | None = None
+    public_response: bool = False
 
     @property
     def thread_id(self):

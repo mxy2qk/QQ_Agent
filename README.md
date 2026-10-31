@@ -1,77 +1,98 @@
 # QQ Personal AI Agent
 
-按根目录需求文档实现的 Phase 0 / Phase 1：DeepSeek 模型封装、LangGraph 单 Agent 工具循环、CLI 多轮对话。实际 API 验收待填写本地配置。
+基于 DeepSeek、LangGraph、SQLite 和 NapCat/OneBot 11 的 QQ 个人助手。支持 CLI、群内 @ 回复、好友私聊、明确授权的长期记忆及可扩展 Skill。
+
+## 当前功能
+
+- 多轮对话，模型/工具执行预算、超时及异常处理。
+- 个人记忆、群共享记忆、权限过滤、来源追溯和全文检索。
+- 会话重启恢复、7 天消息清理、发送去重、限流与断线重连。
+- B站热门与视频元数据；B站/贴吧搜索可能受平台访问限制，不保证可用。
+- 时间查询工具已移除；未接入通用搜索或 MCP。无工具支持的实时信息应明确说明无法核实。
 
 ## 安装
 
-要求 Python 3.11+。当前项目已在 `.venv` 安装独立环境（Python 3.12），不会改变本机 Conda 环境。
+需要 Python 3.11+。推荐使用 [uv](https://docs.astral.sh/uv/)：
 
 ```powershell
-# 推荐：uv 根据锁文件安装开发依赖
 uv sync --extra dev --locked
-
-# 或使用自己选定的 Conda 环境
-conda create -n qq-personal-agent python=3.12 -y
-conda activate qq-personal-agent
-python -m pip install -e '.[dev]'
+Copy-Item .env.example .env
 ```
 
-项目内已创建空白 `.env`。如果从新副本安装，先 `Copy-Item .env.example .env`，不要覆盖已填好的配置。
+已有 `.env` 时不要覆盖。也可在独立 Conda 环境执行 `python -m pip install -e '.[dev]'`。
 
-## 立即运行离线演示
+在本地 `.env` 填写 `DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL` 和 `DEEPSEEK_MODEL`。支持 OpenAI 兼容 Chat Completions 接口，模型需支持工具调用。密钥不要提交到 Git。
+
+## 运行
 
 ```powershell
+# 无模型请求的离线演示
 .\.venv\Scripts\qq-agent.exe --demo
-.\.venv\Scripts\qq-agent.exe --demo --message "现在几点？"
-```
 
-离线演示使用确定性模拟客户端和真实时间工具，不请求 DeepSeek，不能证明模型的自主工具决策能力。
+# 真实模型 CLI；/exit 退出，/reset 清空当前近期会话
+.\.venv\Scripts\qq-agent.exe
 
-## 使用真实 DeepSeek
+# 单条消息不保存到磁盘
+.\.venv\Scripts\qq-agent.exe --ephemeral --message "你好"
 
-在本地 `.env` 填写以下三个字段，或设置同名环境变量（环境变量优先）：
-
-```dotenv
-DEEPSEEK_API_KEY=
-DEEPSEEK_BASE_URL=
-DEEPSEEK_MODEL=
-```
-
-官方兼容地址为 `https://api.deepseek.com`。2026-10-30 核对官方文档列出的模型包括 `deepseek-flash` 与 `deepseek-v4-pro`，请按账号实际权限填写。项目显式禁用 thinking，使用 Chat Completions + Function Calling，本地 Pydantic 严格校验参数；未开启 beta strict schema。
-
-官方参考：[首次调用](https://api-docs.deepseek.com/)、[工具调用](https://api-docs.deepseek.com/guides/tool_calls)。模型 ID 没有默认值。
-
-```powershell
-# 发出真实请求：普通文本 + 强制工具调用 + 本地执行 + 工具结果回传
+# 仅验证模型文本请求
 .\.venv\Scripts\qq-agent.exe --verify-api
 
-# 模型自主决定是否调用工具；可查看 stderr 或 logs/agent.log
-.\.venv\Scripts\qq-agent.exe --message "你好"
-.\.venv\Scripts\qq-agent.exe --message "现在上海几点？"
+# 查看技能 / 检查公开来源（失败会返回非零状态）
+.\.venv\Scripts\qq-agent.exe --list-skills
+.\.venv\Scripts\qq-agent.exe --verify-sources
 
-# 连续聊天
-.\.venv\Scripts\qq-agent.exe
+# 完成 NapCat、白名单及成员告知配置后启用 QQ
+.\.venv\Scripts\qq-agent.exe --qq
 ```
 
-在已激活 Conda 环境并安装项目的情况下，可直接用 `qq-agent` 或 `python main.py`。`/exit` 退出，`/reset` 清空当前会话；`--session` 与 `--user` 指定本地身份。历史仅在当前进程保留，不支持重启恢复；单条命令每次启动新进程。
+QQ 配置见 [QQ_SETUP](docs/QQ_SETUP.md)。本机已安装 NapCat 时，可用根目录 `start-napcat.cmd` 启动；新的仓库副本不包含 NapCat 二进制或登录数据，需自行安装到相应目录。
 
-## 验证
+同一数据库只允许一个 Agent 进程。`--data-dir PATH` 可隔离测试数据；demo 默认使用 `data/demo`。不要与正在运行的 QQ Agent 同时使用默认数据库启动另一 CLI。
+
+## 记忆命令
+
+| 命令 | 用途 |
+| --- | --- |
+| `/remember key=value` 或 `记住：内容` | 保存当前会话私有记忆 |
+| `/remember-global key=value` | 保存同平台本人跨会话记忆，仍仅本人可见 |
+| `/remember-group key=value` | 明确授权保存当前群共享记忆 |
+| `/memories [关键词]` | 查看有权访问的记忆 |
+| `/correct ID 新内容` | 纠正自己的记忆 |
+| `/forget ID` | 删除自己的记忆、来源原文和受影响的近期上下文 |
+| `/share ID`、`/unshare ID` | 切换当前群个人记忆的共享授权 |
+| `/sources ID` | 查看来源事件 |
+| `/history 关键词` | 检索当前本人会话原始消息 |
+| `/reset` | 清空近期会话，保留明确长期记忆 |
+| `/memory-help` | 查看完整帮助 |
+
+列表序号从 1 连续显示；固定 ID 不重用，修改和删除使用 **ID**。群公开回复只使用共享记忆，个人记忆管理请私聊。群组记忆由创建者纠正或删除。
+
+## 数据与边界
+
+原始消息、缓存答复及会话保留 7 天，明确保存的长期记忆单独存活；删除/撤回会清理来源和相关历史。模型仅能调用注册且与技能绑定的工具。外部内容不可信，无验证码/登录绕过，无群管理或主动推送工具。
+
+QQ 发送采用最多一次尝试：结果不确定时不自动重发，过载或断线可能丢消息。日志默认不保存完整消息或密钥。SQLite 文件为明文，请保护本地目录和备份。
+
+## 项目结构
+
+```text
+src/qq_agent/      应用、模型、记忆、存储、渠道和 Skill
+tests/           自动化测试（含测试专用模拟工具）
+docs/             配置、架构、数据模型、需求与测试说明
+.env.example      无密钥配置模板
+pyproject.toml    项目配置
+uv.lock           依赖锁文件
+```
+
+本地运行所需的 `.env`、`.venv/`、`data/`、`logs/`、`napcat/` 不上传。当前运行进程信息保存在 `data/run/qq-agent-process.json`；不要删除正在使用的数据库或 NapCat。
+
+## 开发验证
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q
-.\.venv\Scripts\ruff.exe check .
+.\.venv\Scripts\ruff.exe check src tests
+.\.venv\Scripts\ruff.exe format --check src tests
 ```
 
-测试覆盖对话、时间工具闭环、参数拒绝、异常、取消、调用预算、消息去重、并发串行及会话隔离。SDK 传输测试使用本地 MockTransport，不消耗 API 额度。结果见 [测试报告](docs/TEST_REPORT.md)。
-
-## 边界与配置
-
-默认最多 5 次模型请求、5 次工具尝试；单工具 30 秒、单模型请求 60 秒、整体 120 秒。SDK 自动重试关闭。配置参见 `.env.example`；超时返回清楚错误，工具失败后禁止继续实际执行工具。
-
-日志为 JSON，默认只记录执行元数据，不记录完整消息、Prompt、工具参数、返回值或 API Key。日志轮转保存到 `logs/`。`.env`、日志与环境目录已加入 `.gitignore`。请勿开启第三方 SDK 的网络调试日志。
-
-Phase 1 的去重缓存每个会话最多 256 条，历史最多 20 个完整回合，均为进程内数据。会话总数没有自动淘汰，适用于本地 CLI；QQ 接入前需加入全局容量控制、持久化去重和平台授权策略。
-
-本阶段不提供 QQ 连接、长期记忆、SQLite Checkpointer、Skill 加载或贴吧/B 站数据。QQ 身份、共享策略和保留时间仍待后续阶段确认。
-
-架构和决策见 [ARCHITECTURE](docs/ARCHITECTURE.md)、[DECISIONS](docs/DECISIONS.md)、[开发进度](docs/DEVELOPMENT_PLAN.md)。原始需求文档保持原样。
+更多：[架构](docs/ARCHITECTURE.md) · [数据与权限](docs/DATA_MODEL.md) · [决策](docs/DECISIONS.md) · [测试](docs/TESTING.md) · [原始需求基线](docs/REQUIREMENTS.md)。原始需求是历史基线，当前实现及用户后续决策以本文和决策记录为准。

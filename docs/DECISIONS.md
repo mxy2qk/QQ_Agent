@@ -1,32 +1,25 @@
-# 决策记录
+# 项目决策
 
-## 2026-10-30：Phase 0 / Phase 1
+## 已确认
 
-- 用户授权连续开展 Phase 0 与 Phase 1；后续阶段未启动。
-- 工作区原先仅有需求文档，不是 Git 仓库。保留原始文件；不自动创建提交。
-- 用户要求 DeepSeek 三字段留空，稍后自行填写；因此不执行真实 API 请求，不宣称 API 已验证。
-- 本机 Conda 位于 `C:\code\miniconda`，base Python 3.13.12。项目使用 uv 创建的 `.venv` / Python 3.12.15 做隔离，Conda 环境不变；README 同时提供 Conda 安装路径。
-- 已核对 DeepSeek 官方首次调用与 Tool Calls 文档（2026-10-30）：使用 OpenAI 兼容 SDK、可配置 model/base_url、关闭 thinking、非 beta Function Calling、本地严格校验参数。真实能力取决于用户填写的模型和账号。
-- 已核对 LangGraph Graph API；使用 StateGraph / TypedDict reducer / 异步节点。
-- 模型最多 5 次、工具最多 5 次、工具 30 秒、模型 60 秒、整体 120 秒；SDK 重试为 0，避免隐式请求增加耗时。均可配置。
-- 工具失败后只允许模型解释；即使模型忽略 tool_choice=none，程序仍拒绝进一步实际执行工具，并以步数上限终止。
-- Phase 1 仅注册无外部副作用的异步工具。同步工具不通过线程超时伪装取消；未来需要同步或外部写工具时单独设计执行与授权。
-- CLI 历史只驻留内存，最多 20 完整回合；去重最多 256 结果/会话。同一会话串行，调用失败不保留半完成的工具调用。
-- 临时会话键采用编码后的 platform/chat_type/chat_id/user_id，不在 Phase 1 建立群共享 thread。群级公开上下文在 Phase 2 与 QQ 阶段确定。
-- 不保存原始聊天到磁盘，不自动提取记忆，不添加数据库空表。SQLite 与 Checkpointer 属于 Phase 2。
-- Q1–Q10 仍未定案：QQ 模式 unselected；未来临时 mention_only、个人记忆 private、仅响应策略来自需求文档的临时默认值，不是用户确认。消息保留时间不设有效默认。
-- 工具默认时区 Asia/Shanghai，可配置 TIMEZONE 并在调用中指定 IANA 时区；不依赖执行主机时区。
+- Python 3.11+、DeepSeek兼容SDK、LangGraph、SQLite/FTS5；CLI与渠道层共用Agent Service，不引入FastAPI或多Agent。
+- 原始消息、缓存答复及Checkpoint保留7天；明确长期记忆独立存活，私有默认、共享需明确授权。
+- 删除/纠正/撤回共享时同步清理相关来源原文、索引和近期会话；跨库清理有持久化队列。
+- global仍是同平台本人可见，不自动关联跨平台账号；群公开回复只检索group范围。
+- 稳定ID不重用；显示序号从1连续排列，操作使用ID。
+- QQ采用独立普通账号+NapCat/OneBot，群仅@、白名单好友私聊；使用者确认非官方风险与成员告知。
+- 只允许受控回复，不允许模型决定发送对象或执行群管理。投递不确定不自动重发。
+- 公开只读来源方案已确认；B站热门/详情已验证，搜索访问限制保留，不新增收费或授权替代服务。
+- 时间查询函数及QQ快捷通道按用户要求移除，暂不接入通用搜索或MCP。
 
-## 2026-10-30：Git 初始化
+## 实现取舍
 
-- 用户要求为项目配置 Git，初始化本地仓库，默认分支为 `main`。
-- 提交沿用现有 Git 身份；不改动全局配置。
-- `.gitattributes` 统一源代码及文档为 LF，本仓库 `core.autocrlf=false`；`core.quotepath=false` 便于阅读中文路径。
-- `.env`、虚拟环境、日志、缓存、构建产物与覆盖率文件均忽略；保留无密钥的 `.env.example` 和依赖锁文件。
-- 建立 Phase 0/1 初始提交；未配置远程仓库或推送。
+小规模本地部署对持久化请求串行处理，并对数据库路径加OS锁，避免共享撤回竞态。完成回合快照作为恢复边界，正常图Checkpoint压缩保存，不自动重放中断工具。
 
-## 参考
+Skill来自受信任项目Markdown，工具须程序注册和执行白名单双重校验。只注入命中技能的完整说明；未知实时信息不编造。
 
-- https://api-docs.deepseek.com/
-- https://api-docs.deepseek.com/guides/tool_calls
-- https://docs.langchain.com/oss/python/langgraph/graph-api
+完整中断占位响应被识别为模型异常，最多重试一次且计入预算。失败回合和已移除工具的旧执行回合不继续进入模型上下文，原文按既定保留期保留。
+
+## 本地文件与发布
+
+运行环境、NapCat、配置、数据库、账号数据和当前日志必须保留本地，不进入Git。测试缓存、旧测试数据库、安装压缩包与构建检查产物可清理。过程性修复报告已合并到当前文档；原始需求基线保存在REQUIREMENTS.md。

@@ -10,9 +10,13 @@ requires-python = ">=3.11"
 dependencies = [
   "openai>=1.60,<3",
   "langgraph>=1.0,<2",
+  "langgraph-checkpoint-sqlite>=3,<4",
   "langchain-core>=1.0,<2",
   "pydantic-settings>=2.7,<3",
-  "tzdata>=2025.1",
+  "httpx>=0.28,<1",
+  "beautifulsoup4>=4.12,<5",
+  "PyYAML>=6,<7",
+  "websockets>=15,<18",
 ]
 
 [project.optional-dependencies]
@@ -25,6 +29,7 @@ qq-agent = "qq_agent.cli:main"
 packages = ["src/qq_agent"]
 
 [tool.pytest.ini_options]
+addopts = "-p no:cacheprovider --basetemp=.pytest_tmp"
 testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"

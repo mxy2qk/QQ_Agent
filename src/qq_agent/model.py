@@ -13,6 +13,21 @@ class ModelError(RuntimeError):
     pass
 
 
+class ModelInterruptedError(ModelError):
+    def __init__(self):
+        super().__init__("模型服务临时中断，本次未完成，请稍后重试。")
+
+
+def is_interruption_marker(content):
+    return isinstance(content, str) and content.strip().casefold() in {
+        "[用户中断]",
+        "【用户中断】",
+        "[user interrupted]",
+        "模型服务临时中断，此轮未完成。",
+        "模型服务临时中断，本次未完成，请稍后重试。",
+    }
+
+
 @dataclass(frozen=True)
 class ToolCall:
     id: str
@@ -99,6 +114,8 @@ class DeepSeekClient:
             raise ModelError("模型返回无效的工具调用标识")
         if not msg.content and not calls:
             raise ModelError("模型返回空回答")
+        if not calls and is_interruption_marker(msg.content):
+            raise ModelInterruptedError()
         return ModelResponse(
             msg.content or "",
             calls,
@@ -118,10 +135,7 @@ class DemoClient:
         if last["role"] == "tool":
             data = json.loads(last["content"])
             return ModelResponse("[离线演示] " + json.dumps(data, ensure_ascii=False))
-        text = last.get("content", "")
-        if any(word in text for word in ("几点", "时间", "time")):
-            return ModelResponse(tool_calls=[ToolCall("demo-time", "get_current_time", "{}")])
-        return ModelResponse("[离线演示] 你好！可询问“现在几点？”。真实对话需填写 .env。")
+        return ModelResponse("[离线演示] 你好！真实对话需填写 .env；实时信息需要可用工具支持。")
 
     async def close(self):
         pass
