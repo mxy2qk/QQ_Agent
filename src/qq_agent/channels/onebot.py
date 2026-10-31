@@ -112,6 +112,10 @@ class OneBotAdapter:
             if kind == "group" and not mentioned:
                 return None
             content = "".join(pieces).strip()
+            if kind == "group" and mentioned and not content:
+                if not all(segment.get("type") in {"text", "at"} for segment in segments):
+                    return None
+                content = "/help"
             message_id = event.get("message_id")
             if isinstance(message_id, bool) or not isinstance(message_id, (int, str)):
                 return None

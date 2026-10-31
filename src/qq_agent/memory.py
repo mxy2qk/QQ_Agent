@@ -8,21 +8,6 @@ from qq_agent.storage import MemoryAccessError, note_key
 
 memory_context: ContextVar[list | None] = ContextVar("memory_context", default=None)
 
-HELP = """记忆命令：
-/remember 名称=内容  保存当前会话的私有记忆（也可说“记住：内容”）
-/remember-global 名称=内容  保存本人跨会话记忆（仍仅本人可见）
-/remember-group 名称=内容  明确授权保存当前群共享记忆
-/memories [关键词]  查看当前有权访问的记忆
-/correct ID 新内容  纠正自己的记忆
-/share ID  明确授权在当前群共享自己的记忆
-/unshare ID  撤回群共享，恢复私有
-/forget ID  删除自己的记忆及来源消息，并清理受影响会话
-/sources ID  查看自己的记忆来源
-/history 关键词  检索当前本人会话的原始消息（最多 20 条）
-列表序号每次从1开始；修改、删除请使用固定ID，不是列表序号。
-同名记忆会更新。群组记忆由创建者纠正/删除。
-"""
-
 
 @dataclass(frozen=True)
 class MemoryCandidate:
@@ -74,8 +59,6 @@ class MemoryManager:
 
     def handle_command(self, actor):
         text = actor.text
-        if text in {"/help", "/memory-help"}:
-            return HELP
         try:
             candidate = self.extractor.extract(text) if self.enabled else None
             if candidate:

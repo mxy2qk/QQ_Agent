@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from langgraph.types import Overwrite
 
+from qq_agent.command_help import command_help
 from qq_agent.config import Settings
 from qq_agent.graph import build_graph
 from qq_agent.memory import MemoryManager, memory_context
@@ -44,6 +45,7 @@ class AgentService:
     ):
         self.settings = settings
         self.registry = registry
+        self.skill_manager = skill_manager
         self.persistence = persistence
         self.database = persistence.database if persistence else None
         self.memory = (
@@ -95,6 +97,27 @@ class AgentService:
         started = time.monotonic()
         session = self.sessions.setdefault(message.thread_id, Session())
         async with session.lock:
+            help_text = command_help(
+                message.text,
+                message,
+                self.settings,
+                self.skill_manager,
+                persistent=self.persistence is not None,
+            )
+            if help_text is not None:
+                if self.database:
+                    cached = self.database.reply(message)
+                    if cached:
+                        return AgentReply(**cached)
+                    self.database.touch(message)
+                    self.database.complete(
+                        message, self.database.turns(message), asdict(AgentReply(help_text, "ok"))
+                    )
+                else:
+                    session.replies[message.message_id] = AgentReply(help_text, "ok")
+                    if len(session.replies) > 256:
+                        session.replies.popitem(last=False)
+                return AgentReply(help_text, "ok")
             if self.database:
                 cached = self.database.reply(message)
                 if cached:

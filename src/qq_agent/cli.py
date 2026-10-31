@@ -113,7 +113,7 @@ async def run(args):
             print(reply.text)
             return 0 if reply.status == "ok" else 1
         print("QQ Personal Agent" + (" [离线演示]" if args.demo else " [DeepSeek]"))
-        print("输入 /exit 退出，/reset 清空近期会话，/memory-help 查看记忆命令。")
+        print("输入 /exit 退出，/reset 清空近期会话，/help 查看操作帮助。")
         print(
             "会话仅在当前进程保留。"
             if args.ephemeral

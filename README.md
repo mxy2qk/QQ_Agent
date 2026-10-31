@@ -52,8 +52,11 @@ QQ 配置见 [QQ_SETUP](docs/QQ_SETUP.md)。本机已安装 NapCat 时，可用�
 
 ## 记忆命令
 
+群里 **@机器人 /help**（或只@不带文字）或好友私聊 **/help** 获取操作说明；`/help 命令名` 查看详细用法，`/help memory`、`/help skills` 按主题查看。完整中文文档见 [操作手册](docs/OPERATIONS.md)。帮助由程序直接返回，不调用模型。
+
 | 命令 | 用途 |
 | --- | --- |
+| `/help [命令名或主题]` | 按当前群聊/私聊显示操作说明 |
 | `/remember key=value` 或 `记住：内容` | 保存当前会话私有记忆 |
 | `/remember-global key=value` | 保存同平台本人跨会话记忆，仍仅本人可见 |
 | `/remember-group key=value` | 明确授权保存当前群共享记忆 |
