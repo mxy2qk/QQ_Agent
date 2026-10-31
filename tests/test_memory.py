@@ -43,8 +43,14 @@ class EchoClient:
     async def generate(self, messages, tools=None, tool_choice="auto"):
         self.requests.append(list(messages))
         await asyncio.sleep(self.delay)
-        memories = [m["content"] for m in messages if "以下 JSON" in str(m.get("content"))]
-        return ModelResponse("授权内容：" + " ".join(memories))
+        memories = [
+            json.loads(m["content"].split("\n", 1)[1])
+            for m in messages
+            if "以下 JSON" in str(m.get("content"))
+        ]
+        return ModelResponse(
+            "授权内容：" + " ".join(row["content"] for rows in memories for row in rows)
+        )
 
 
 @pytest.fixture

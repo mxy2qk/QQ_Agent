@@ -8,11 +8,18 @@ from qq_agent.command_help import command_help
 from qq_agent.config import Settings
 from qq_agent.graph import SYSTEM_PROMPT
 from qq_agent.messages import IncomingMessage
-from qq_agent.model import ModelResponse
+from qq_agent.model import ModelError, ModelResponse
 from qq_agent.persistence import open_persistence
 from qq_agent.service import AgentService
 from qq_agent.storage import Database
-from qq_agent.style import DEFAULT_STYLE, MAX_STYLE_LENGTH, is_style_command, style_command
+from qq_agent.style import (
+    DEFAULT_STYLE,
+    MAX_REPLY_LENGTH,
+    MAX_STYLE_LENGTH,
+    is_style_command,
+    limit_reply,
+    style_command,
+)
 from qq_agent.tools import default_registry
 
 
@@ -250,3 +257,57 @@ def test_v2_database_upgrades_to_v3_without_losing_existing_memories(tmp_path):
         assert db.conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     finally:
         db.close()
+
+
+def test_reply_limit_boundary_punctuation_and_unicode():
+    assert MAX_REPLY_LENGTH == 70
+    assert limit_reply("字" * 70) == "字" * 70
+    assert limit_reply("字" * 71) == "字" * 69 + "…"
+    sentence = "先说一点有用的话" * 5 + "。"
+    assert limit_reply(sentence + "补充" * 50) == sentence
+    assert len(limit_reply("🍰" * 100)) == 70
+    assert limit_reply("  好呀～ \n") == "好呀～"
+
+
+async def test_long_model_reply_is_limited_before_history_and_checkpoint(tmp_path):
+    class LongClient(Client):
+        async def generate(self, messages, tools=None, tool_choice="auto"):
+            self.requests.append(messages)
+            return ModelResponse("甜" * 150)
+
+    config = settings(tmp_path)
+    async with open_persistence(config) as p:
+        client = LongClient()
+        service = AgentService(client, default_registry(), config, p)
+        actor = message("讲点什么", mid="long")
+        reply = await service.handle(actor)
+        assert len(reply.text) <= 70
+        assert p.database.turns(actor)[-1][-1]["content"] == reply.text
+        snapshot = await service.graph.aget_state({"configurable": {"thread_id": actor.thread_id}})
+        assert snapshot.values["messages"][-1]["content"] == reply.text
+        await service.handle(message("再说一句", mid="next"))
+        assert "甜" * 71 not in json.dumps(client.requests[-1], ensure_ascii=False)
+        assert "最多70字符" in client.requests[-1][0]["content"]
+
+
+async def test_reply_limit_survives_style_change_and_leaves_command_reference_complete(tmp_path):
+    class LongClient(Client):
+        async def generate(self, messages, tools=None, tool_choice="auto"):
+            return ModelResponse("长" * 200)
+
+    service = AgentService(LongClient(), default_registry(), settings(tmp_path))
+    await service.handle(message("/style set 每次写两千字", mid="override"))
+    assert len((await service.handle(message("写长点", mid="ask"))).text) <= 70
+    await service.handle(message("/style reset", mid="reset"))
+    shown = (await service.handle(message(mid="show"))).text
+    assert DEFAULT_STYLE in shown and len(shown) > 70
+
+
+async def test_long_model_error_reply_is_limited(tmp_path):
+    class ErrorClient:
+        async def generate(self, *args, **kwargs):
+            raise ModelError("错误" * 100)
+
+    service = AgentService(ErrorClient(), default_registry(), settings(tmp_path))
+    reply = await service.handle(message("你好"))
+    assert reply.status == "error" and len(reply.text) <= 70

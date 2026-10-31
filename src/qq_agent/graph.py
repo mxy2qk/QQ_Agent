@@ -17,7 +17,7 @@ from qq_agent.model import (
     ToolCall,
     is_interruption_marker,
 )
-from qq_agent.style import reply_style_context, style_prompt
+from qq_agent.style import limit_reply, reply_style_context, style_prompt
 from qq_agent.tools import ToolExecutor, ToolRegistry
 
 logger = logging.getLogger("qq_agent")
@@ -133,8 +133,11 @@ def build_graph(
             return {"error": str(exc), "steps": steps}
         except ModelError as exc:
             return {"error": str(exc), "steps": state["steps"] + 1}
+        message = response.as_message()
+        if not response.tool_calls and message.get("content"):
+            message["content"] = limit_reply(message["content"])
         return {
-            "messages": [response.as_message()],
+            "messages": [message],
             "steps": state["steps"] + 1,
             "usage": response.usage,
             "retry_interrupted": False,
@@ -188,9 +191,9 @@ def build_graph(
                 },
             )
         if state.get("error"):
-            return {"reply": state["error"]}
+            return {"reply": limit_reply(state["error"])}
         reply = state["messages"][-1].get("content")
-        return {"reply": reply or "模型未提供最终文本回答"}
+        return {"reply": limit_reply(reply or "模型未提供最终文本回答")}
 
     graph = StateGraph(AgentState)
     graph.add_node("prepare_context", prepare_context)
