@@ -76,7 +76,7 @@ COMMANDS = (
         "reset",
         "/reset",
         "清空当前近期会话",
-        "删除当前会话的近期消息和Checkpoint，明确保存的长期记忆仍保留。群里只清除本人该群近期会话；不会清除整个群。",
+        "删除当前会话的近期消息和Checkpoint，明确保存的长期记忆仍保留。启用群上下文时，还清除本人在该群的摘录，并使同群答复快照失效；不删除其他成员原始摘录。",
     ),
     Command(
         "skill",
@@ -137,6 +137,10 @@ def command_help(text, message, settings, skill_manager=None, persistent=True):
         if group
         else "QQ私聊需已加好友且在白名单内。直接发普通文字即可聊天。"
     )
+    if group and settings.qq_group_context_enabled:
+        intro += (
+            f" 已启用授权成员普通文字上下文，保留{settings.message_retention_days}天；仍仅@时回复。"
+        )
     lines = [title, intro, *[f"{item.syntax}：{item.summary}" for item in rows]]
     if topic == "memory":
         lines.append("高级范围管理：/help share、/help unshare；私聊记忆不能凭ID跨群共享。")

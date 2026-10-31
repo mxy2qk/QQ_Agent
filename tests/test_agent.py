@@ -180,7 +180,8 @@ async def test_identity_and_chat_isolation(second):
     svc = service(client)
     await svc.handle(msg())
     await svc.handle(second)
-    assert len(client.requests[1][0]) == 2
+    assert len(client.requests[1][0]) == (3 if second.platform == "qq" else 2)
+    assert "private-one" not in json.dumps(client.requests[1][0])
 
 
 async def test_reset_and_history_bounds():

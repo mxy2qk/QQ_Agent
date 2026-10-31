@@ -9,6 +9,7 @@ from langgraph.types import Overwrite
 
 from qq_agent.command_help import command_help
 from qq_agent.config import Settings
+from qq_agent.conversation import conversation_context, make_context, member_targets
 from qq_agent.graph import build_graph
 from qq_agent.memory import MemoryManager, memory_context
 from qq_agent.messages import IncomingMessage
@@ -73,6 +74,7 @@ class AgentService:
             }
         )
         memory_token = memory_context.set(None)
+        conversation_token = conversation_context.set(None)
         try:
             async with asyncio.timeout(self.settings.agent_timeout_seconds):
                 if self.persistence:
@@ -90,6 +92,7 @@ class AgentService:
             )
             return AgentReply("本次请求失败，请检查配置或查看日志中的错误类型", "error")
         finally:
+            conversation_context.reset(conversation_token)
             memory_context.reset(memory_token)
             request_context.reset(token)
 
@@ -142,6 +145,23 @@ class AgentService:
             elif message.message_id in session.replies:
                 logger.info("message_duplicate")
                 return session.replies[message.message_id]
+            if message.platform == "qq":
+                excerpts = []
+                enabled = self.settings.qq_group_context_enabled
+                if enabled and self.database and message.chat_type == "group":
+                    self.database.observe_group(
+                        message,
+                        self.settings.qq_allowed_groups,
+                        self.settings.qq_allowed_group_users,
+                    )
+                    excerpts = self.database.group_context(
+                        message,
+                        self.settings.qq_allowed_groups,
+                        self.settings.qq_allowed_group_users,
+                        self.settings.message_retention_days,
+                        member_targets(message),
+                    )
+                conversation_context.set(make_context(message, excerpts, enabled))
             # Keep raw messages for their normal retention period, but omit failed
             # turns entirely from model context. Rewriting a failure as an assistant
             # reply still encourages the model to repeat that failed answer.
@@ -214,6 +234,15 @@ class AgentService:
                 },
             )
             return reply
+
+    async def observe_group(self, message):
+        if not self.persistence or not self.settings.qq_group_context_enabled:
+            return
+        async with self.persistence.lock:
+            self._clear_cached_threads(await self.persistence.cleanup())
+            self.database.observe_group(
+                message, self.settings.qq_allowed_groups, self.settings.qq_allowed_group_users
+            )
 
     async def cleanup(self):
         if self.persistence:

@@ -10,7 +10,7 @@ from uuid import uuid4
 from pydantic import ValidationError
 from websockets.asyncio.client import connect
 
-from qq_agent.messages import IncomingMessage
+from qq_agent.messages import GroupMember, IncomingMessage
 
 logger = logging.getLogger("qq_agent")
 
@@ -67,6 +67,51 @@ class OneBotAdapter:
         self.last_reply = {}
         self.last_sent = 0
         self.ws = None
+        self.group_members = {}
+        self.roster_checked = {}
+
+    def member_snapshot(self, group):
+        known = self.group_members.get(group, {})
+        ids = self.settings.qq_allowed_group_users or sorted(known)
+        return tuple(known.get(uid, GroupMember(user_id=uid)) for uid in ids[:100])
+
+    async def enrich_members(self, message):
+        group = message.chat_id
+        if time.monotonic() - self.roster_checked.get(group, -600) >= 300:
+            self.roster_checked[group] = time.monotonic()
+            try:
+                async with asyncio.timeout(5):
+                    rows = await self.call("get_group_member_list", {"group_id": int(group)})
+                if not isinstance(rows, list):
+                    raise OneBotError("invalid_member_list")
+                known = self.group_members.setdefault(group, {})
+                for row in rows:
+                    if not isinstance(row, dict):
+                        continue
+                    try:
+                        uid = stable_id(row.get("user_id"))
+                        row_group = (
+                            stable_id(row["group_id"]) if row.get("group_id") is not None else group
+                        )
+                    except (TypeError, ValueError):
+                        continue
+                    if row_group != group:
+                        continue
+                    if uid == self.settings.qq_self_id or (
+                        self.settings.qq_allowed_group_users
+                        and uid not in self.settings.qq_allowed_group_users
+                    ):
+                        continue
+                    known[uid] = GroupMember(
+                        user_id=uid,
+                        nickname=row.get("nickname", "")[:256]
+                        if isinstance(row.get("nickname"), str)
+                        else "",
+                        card=row.get("card", "")[:256] if isinstance(row.get("card"), str) else "",
+                    )
+            except (OneBotError, TimeoutError, ValueError, TypeError):
+                logger.warning("qq_member_lookup_failed", extra={"fields": {"status": "fallback"}})
+        return message.model_copy(update={"group_members": self.member_snapshot(group)})
 
     def normalize(self, event):
         try:
@@ -102,19 +147,24 @@ class OneBotAdapter:
             segments = event.get("message")
             if not isinstance(segments, list) or len(segments) > 100:
                 return None
-            pieces, mentioned = [], False
+            pieces, mentioned, mentions = [], False, []
             for segment in segments:
                 if not isinstance(segment, dict) or not isinstance(segment.get("data"), dict):
                     return None
                 if segment.get("type") == "at":
-                    mentioned |= str(segment["data"].get("qq")) == self.settings.qq_self_id
+                    target = str(segment["data"].get("qq"))
+                    mentioned |= target == self.settings.qq_self_id
+                    if target != self.settings.qq_self_id and target.isdecimal():
+                        target = stable_id(target)
+                        mentions.append(target)
+                        pieces.append(f" @QQ({target}) ")
                 elif segment.get("type") == "text":
                     value = segment["data"].get("text")
                     if not isinstance(value, str):
                         return None
                     pieces.append(value)
                 # No file, reply, image, anonymous or forwarded-message fetching.
-            if kind == "group" and not mentioned:
+            if kind == "group" and not mentioned and not self.settings.qq_group_context_enabled:
                 return None
             content = "".join(pieces).strip()
             if kind == "group" and mentioned and not content:
@@ -124,6 +174,17 @@ class OneBotAdapter:
             message_id = event.get("message_id")
             if isinstance(message_id, bool) or not isinstance(message_id, (int, str)):
                 return None
+            if kind == "group":
+                known = self.group_members.setdefault(chat, {})
+                known[user] = GroupMember(
+                    user_id=user,
+                    nickname=sender.get("nickname", "")[:256]
+                    if isinstance(sender.get("nickname"), str)
+                    else "",
+                    card=sender.get("card", "")[:256]
+                    if isinstance(sender.get("card"), str)
+                    else "",
+                )
             return IncomingMessage(
                 platform="qq",
                 message_id=str(message_id),
@@ -134,13 +195,27 @@ class OneBotAdapter:
                 text=content,
                 is_mentioned=mentioned,
                 public_response=(kind == "group"),
+                group_members=self.member_snapshot(chat) if kind == "group" else (),
+                mentioned_users=tuple(mentions),
             )
         except (ValueError, TypeError, ValidationError):
             return None
 
     async def call(self, action, params):
-        if action not in {"get_login_info", "send_group_msg", "send_private_msg"}:
+        if action not in {
+            "get_login_info",
+            "get_group_member_list",
+            "send_group_msg",
+            "send_private_msg",
+        }:
             raise OneBotError("action_not_allowed")
+        if action == "get_group_member_list":
+            try:
+                group = stable_id(params.get("group_id"))
+            except (TypeError, ValueError):
+                raise OneBotError("group_not_allowed") from None
+            if group not in self.settings.qq_allowed_groups or set(params) != {"group_id"}:
+                raise OneBotError("group_not_allowed")
         if self.ws is None:
             raise OneBotError("disconnected")
         echo = uuid4().hex
@@ -190,6 +265,15 @@ class OneBotAdapter:
                     future.set_exception(OneBotError("connection_lost_delivery_unknown"))
 
     async def process(self, message):
+        if message.chat_type == "group" and not message.is_mentioned:
+            if self.settings.qq_group_context_enabled:
+                try:
+                    await self.service.observe_group(message)
+                except Exception as exc:  # noqa: BLE001 -- ambient messages never trigger replies
+                    logger.error(
+                        "qq_observe_failed", extra={"fields": {"error_type": type(exc).__name__}}
+                    )
+            return
         key = self.settings.qq_self_id + ":" + message.thread_id + ":" + message.message_id
         if not self.ledger.reserve(key):
             logger.info("qq_duplicate_dropped")
@@ -214,6 +298,12 @@ class OneBotAdapter:
             ):
                 content = "个人记忆请私聊管理。群共享信息请明确使用 /remember-group 名称=内容。"
             else:
+                if (
+                    message.chat_type == "group"
+                    and self.settings.qq_group_context_enabled
+                    and not message.text.startswith(("/", "记住"))
+                ):
+                    message = await self.enrich_members(message)
                 content = (await self.service.handle(message)).text
             wait = self.settings.qq_reply_interval_seconds - (time.monotonic() - self.last_sent)
             if wait > 0:

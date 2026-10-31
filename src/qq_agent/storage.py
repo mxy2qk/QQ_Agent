@@ -59,6 +59,15 @@ CREATE TABLE IF NOT EXISTS memory_sources (
  source_user_id TEXT NOT NULL, source_message_id TEXT NOT NULL,
  event TEXT NOT NULL, created_at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS purge_queue (thread_id TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS group_context_messages (
+ platform TEXT NOT NULL,chat_id TEXT NOT NULL,user_id TEXT NOT NULL,message_id TEXT NOT NULL,
+ nickname TEXT,content TEXT NOT NULL,created_at REAL NOT NULL,tombstone INTEGER NOT NULL DEFAULT 0,
+ PRIMARY KEY(platform,chat_id,user_id,message_id));
+CREATE INDEX IF NOT EXISTS group_context_lookup ON group_context_messages(platform,chat_id,created_at);
+CREATE TRIGGER IF NOT EXISTS group_context_redact AFTER DELETE ON messages BEGIN
+ UPDATE group_context_messages SET content='',nickname=NULL,tombstone=1
+ WHERE platform=old.platform AND chat_id=old.chat_id AND user_id=old.user_id
+ AND message_id=old.message_id AND old.chat_type='group'; END;
 CREATE INDEX IF NOT EXISTS memories_visibility ON memories(platform,scope,chat_type,chat_id,owner_id);
 CREATE INDEX IF NOT EXISTS messages_expiry ON messages(created_at);
 CREATE INDEX IF NOT EXISTS sessions_owner ON sessions(platform,user_id);
@@ -75,7 +84,7 @@ CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
  INSERT INTO messages_fts(rowid,content) VALUES(new.id,new.content); END;
 CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
  DELETE FROM messages_fts WHERE rowid=old.id; END;
-PRAGMA user_version=1;
+PRAGMA user_version=2;
 """
 
 
@@ -88,13 +97,70 @@ class Database:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA secure_delete=ON")
         version = self.conn.execute("PRAGMA user_version").fetchone()[0]
-        if version > 1:
+        if version > 2:
             self.conn.close()
             raise ValueError("数据库版本较新，请升级程序")
         self.conn.executescript(SCHEMA)
 
     def close(self):
         self.conn.close()
+
+    @staticmethod
+    def _group_allowed(actor, groups, users):
+        return (
+            actor.platform == "qq"
+            and actor.chat_type == "group"
+            and actor.public_response
+            and actor.chat_id in groups
+            and (not users or actor.user_id in users)
+        )
+
+    def observe_group(self, actor, groups, users):
+        if not self._group_allowed(actor, groups, users):
+            return
+        # Commands are only handled when addressing the bot; never turn ambient
+        # personal-memory instructions into a shared memory or a model request.
+        if actor.text.startswith(("/", "记住")):
+            return
+        with self.transaction() as db:
+            db.execute(
+                "INSERT OR IGNORE INTO group_context_messages "
+                "(platform,chat_id,user_id,message_id,nickname,content,created_at) VALUES(?,?,?,?,?,?,?)",
+                (
+                    actor.platform,
+                    actor.chat_id,
+                    actor.user_id,
+                    actor.message_id,
+                    actor.nickname,
+                    actor.text,
+                    time.time(),
+                ),
+            )
+
+    def group_context(self, actor, groups, users, days, targets=()):
+        if not self._group_allowed(actor, groups, users):
+            return []
+        query = (
+            "SELECT user_id,message_id,nickname,content,created_at FROM group_context_messages "
+            "WHERE platform=? AND chat_id=? AND tombstone=0 AND created_at>?"
+        )
+        args = [actor.platform, actor.chat_id, time.time() - days * 86400]
+        for selected in (users, targets):
+            if selected:
+                query += " AND user_id IN (" + ",".join("?" for _ in selected) + ")"
+                args.extend(selected)
+        rows = self.conn.execute(query + " ORDER BY created_at DESC LIMIT 60", args).fetchall()
+        result, size = [], 0
+        for row in rows:
+            item = dict(row)
+            item["truncated"] = len(item["content"]) > 1200
+            item["content"] = item["content"][:1200]
+            cost = len(json.dumps(item, ensure_ascii=False))
+            if size + cost > 10000:
+                continue
+            result.append(item)
+            size += cost
+        return list(reversed(result))
 
     @contextmanager
     def transaction(self):
@@ -418,6 +484,22 @@ class Database:
 
     def reset(self, actor):
         with self.transaction() as db:
+            if (
+                actor.chat_type == "group"
+                and db.execute(
+                    "SELECT 1 FROM group_context_messages WHERE platform=? AND chat_id=? "
+                    "AND user_id=? AND tombstone=0 LIMIT 1",
+                    (actor.platform, actor.chat_id, actor.user_id),
+                ).fetchone()
+            ):
+                db.execute(
+                    "UPDATE group_context_messages SET content='',nickname=NULL,tombstone=1 "
+                    "WHERE platform=? AND chat_id=? AND user_id=?",
+                    (actor.platform, actor.chat_id, actor.user_id),
+                )
+                self._invalidate(
+                    db, {"scope": "group", "platform": actor.platform, "chat_id": actor.chat_id}
+                )
             db.execute("INSERT OR IGNORE INTO purge_queue VALUES(?)", (actor.thread_id,))
             db.execute("UPDATE sessions SET turns='[]' WHERE thread_id=?", (actor.thread_id,))
             db.execute("DELETE FROM messages WHERE thread_id=?", (actor.thread_id,))
@@ -430,6 +512,14 @@ class Database:
         now = time.time() if now is None else now
         cutoff = now - days * 86400
         with self.transaction() as db:
+            groups = db.execute(
+                "SELECT DISTINCT platform,chat_id FROM group_context_messages "
+                "WHERE created_at<=? AND tombstone=0",
+                (cutoff,),
+            ).fetchall()
+            for group in groups:
+                self._invalidate(db, {"scope": "group", **dict(group)})
+            db.execute("DELETE FROM group_context_messages WHERE created_at<=?", (cutoff,))
             expired = db.execute("SELECT * FROM memories WHERE expires_at<=?", (now,)).fetchall()
             for memory in expired:
                 self._invalidate(db, memory)

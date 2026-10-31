@@ -21,6 +21,7 @@ QQ_ACCESS_TOKEN=填写与NapCat网络服务相同的令牌
 QQ_SELF_ID=填写机器人QQ号
 QQ_ALLOWED_GROUPS=["填写授权群号"]
 QQ_ALLOWED_GROUP_USERS=[]
+QQ_GROUP_CONTEXT_ENABLED=false
 QQ_ALLOWED_USERS=["填写授权好友QQ号"]
 QQ_PRIVATE_ENABLED=true
 QQ_LIVE_ENABLED=false
@@ -38,15 +39,15 @@ QQ_LIVE_ENABLED=false
 .\.venv\Scripts\qq-agent.exe --qq
 ```
 
-程序先核验 `get_login_info`，再处理白名单群的实际 @消息和白名单好友私聊。非@群消息不交给 Agent 或保存。没有自动加好友、入群、群管理或主动推送行为。
+程序先核验 `get_login_info`，再处理白名单群的实际 @消息和白名单好友私聊。默认不保存非@群消息；经明确授权后可启用 `QQ_GROUP_CONTEXT_ENABLED=true`，只记录授权成员的普通文字作同群上下文，仍仅@时回复。详情见 [群成员与上下文](GROUP_CONTEXT.md)。没有自动加好友、入群、群管理或主动推送行为。
 
-可由群管理者发布告知：仅处理明确@的文字消息；原始消息及会话保留7天，明确记忆独立保存；个人记忆请私聊管理，群共享使用 `/remember-group`；用 `/forget ID` 删除自己的记忆，`/reset` 清除近期会话。
+可由群管理者按实际开关发布告知：机器人仅@时回复；启用群上下文时，也会读取指定成员的普通文字并供同群问答参考。原始消息、摘录及会话保留7天，明确记忆独立保存；个人记忆请私聊管理，群共享使用 `/remember-group`；用 `/forget ID` 删除自己的记忆，群内 `/reset` 清除本人近期会话与摘录。
 
 ## 测试
 
 使用者可在群内@后发送 `/help`，或在好友私聊发送 `/help`，查看按当前场景筛选的命令说明。`/help 命令名` 查看详细解释。完整使用说明见 [OPERATIONS.md](OPERATIONS.md)。
 
-1. 非@消息、其他群、非白名单用户应不回复。
+1. 非@消息、其他群、非白名单用户应不回复；开启群上下文时，仅允许授权成员普通文字入库。
 2. 群@与好友私聊正常回复，昵称变化不影响身份。
 3. 私聊保存的 private/global 信息不用于群公开回答。
 4. 明确创建的群记忆可供同群成员读取，其他群不可访问。
