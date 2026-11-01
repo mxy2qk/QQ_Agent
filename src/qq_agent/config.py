@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     qq_allowed_groups: list[str] = Field(default_factory=list)
     qq_allowed_group_users: list[str] = Field(default_factory=list)
     qq_group_context_enabled: bool = False
+    qq_control_users: list[str] = Field(default_factory=list)
     qq_allowed_users: list[str] = Field(default_factory=list)
     qq_private_enabled: bool = False
     qq_live_enabled: bool = False
@@ -99,6 +100,7 @@ class Settings(BaseSettings):
             for x in [
                 *self.qq_allowed_groups,
                 *self.qq_allowed_group_users,
+                *self.qq_control_users,
                 *self.qq_allowed_users,
             ]
         ):

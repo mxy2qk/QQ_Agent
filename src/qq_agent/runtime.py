@@ -516,6 +516,25 @@ def show_status(paths):
     if state.get("phase") == "paused":
         print("修正配置或检查日志后，双击“启动机器人”重新尝试。")
     print("日志：logs/agent.log；data/run/supervisor.log；data/run/managed-agent.stderr.log")
+    try:
+        import sqlite3
+
+        config = Settings()
+        with sqlite3.connect(
+            Path(config.database_path).resolve().as_uri() + "?mode=ro", uri=True
+        ) as db:
+            modes = [
+                (
+                    db.execute(
+                        "SELECT mode FROM auto_settings WHERE group_id=?", (group,)
+                    ).fetchone()
+                    or ("off",)
+                )[0]
+                for group in config.qq_allowed_groups
+            ]
+        print("选择性接话：" + ("、".join(modes) if modes else "无授权群"))
+    except (OSError, ValueError, sqlite3.Error):
+        print("选择性接话：尚未初始化")
 
 
 def main():

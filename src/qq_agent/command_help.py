@@ -14,6 +14,13 @@ class Command:
 
 COMMANDS = (
     Command(
+        "auto",
+        "/auto [status|shadow|on|off|cooldown 秒|limit 次数]",
+        "查看或管理选择性接话",
+        "群内需@。默认off；shadow仅观察；on才主动接话。开关和参数限机器人管理者，status供授权成员查看。默认90秒冷却、每小时6次发送/20次判定，最多70字符。",
+        "group",
+    ),
+    Command(
         "style",
         "/style [show|set 内容|reset]",
         "查看、微调或恢复全局回复风格",
@@ -135,7 +142,7 @@ def command_help(text, message, settings, skill_manager=None, persistent=True):
         item
         for item in COMMANDS
         if item.scope in {"both", scope}
-        and (topic != "memory" or item.name not in {"help", "skill", "style"})
+        and (topic != "memory" or item.name not in {"help", "skill", "style", "auto"})
     ]
     title = "群聊操作帮助" if group else "私聊/CLI操作帮助"
     intro = (

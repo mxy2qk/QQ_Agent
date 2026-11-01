@@ -46,6 +46,8 @@ class AgentService:
         skill_manager=None,
     ):
         self.settings = settings
+        self.client = client
+        self.auto_controller = None
         self.registry = registry
         self.skill_manager = skill_manager
         self.persistence = persistence
@@ -104,6 +106,8 @@ class AgentService:
         started = time.monotonic()
         session = self.sessions.setdefault(message.thread_id, Session())
         async with session.lock:
+            if message.text.split()[0].lower() == "/auto" and self.auto_controller:
+                return self.auto_controller.command(message)
             help_text = command_help(
                 message.text,
                 message,

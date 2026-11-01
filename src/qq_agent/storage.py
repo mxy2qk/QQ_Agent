@@ -59,6 +59,13 @@ CREATE TABLE IF NOT EXISTS memory_sources (
  source_user_id TEXT NOT NULL, source_message_id TEXT NOT NULL,
  event TEXT NOT NULL, created_at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS purge_queue (thread_id TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS auto_settings (
+ group_id TEXT PRIMARY KEY,mode TEXT NOT NULL DEFAULT 'off',cooldown INTEGER NOT NULL DEFAULT 90,
+ hourly_limit INTEGER NOT NULL DEFAULT 6);
+CREATE TABLE IF NOT EXISTS auto_events (
+ event_key TEXT PRIMARY KEY,group_id TEXT NOT NULL,kind TEXT NOT NULL,created_at REAL NOT NULL);
+CREATE INDEX IF NOT EXISTS auto_events_window ON auto_events(group_id,kind,created_at);
+CREATE TABLE IF NOT EXISTS auto_status (group_id TEXT PRIMARY KEY,reason TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS reply_style_settings (
  id INTEGER PRIMARY KEY CHECK(id=1),content TEXT NOT NULL,updated_at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS group_context_messages (
@@ -86,7 +93,7 @@ CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
  INSERT INTO messages_fts(rowid,content) VALUES(new.id,new.content); END;
 CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
  DELETE FROM messages_fts WHERE rowid=old.id; END;
-PRAGMA user_version=3;
+PRAGMA user_version=4;
 """
 
 
@@ -99,7 +106,7 @@ class Database:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA secure_delete=ON")
         version = self.conn.execute("PRAGMA user_version").fetchone()[0]
-        if version > 3:
+        if version > 4:
             self.conn.close()
             raise ValueError("数据库版本较新，请升级程序")
         self.conn.executescript(SCHEMA)
@@ -532,6 +539,7 @@ class Database:
         now = time.time() if now is None else now
         cutoff = now - days * 86400
         with self.transaction() as db:
+            db.execute("DELETE FROM auto_events WHERE created_at<=?", (cutoff,))
             groups = db.execute(
                 "SELECT DISTINCT platform,chat_id FROM group_context_messages "
                 "WHERE created_at<=? AND tombstone=0",

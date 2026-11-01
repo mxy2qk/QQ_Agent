@@ -65,11 +65,18 @@ class OneBotAdapter:
         self.ledger = DeliveryLedger(database, settings.message_retention_days)
         self.pending = {}
         self.queue = asyncio.Queue(maxsize=64)
+        self.urgent = asyncio.Queue(maxsize=64)
+        self.ready = asyncio.Event()
+        self.explicit_busy = False
+        self.send_lock = asyncio.Lock()
         self.last_reply = {}
         self.last_sent = 0
         self.ws = None
         self.group_members = {}
         self.roster_checked = {}
+        from qq_agent.selective_reply import SelectiveReply
+
+        self.auto = SelectiveReply(self)
 
     def member_snapshot(self, group):
         known = self.group_members.get(group, {})
@@ -167,7 +174,17 @@ class OneBotAdapter:
                 kind == "group"
                 and self.settings.qq_allowed_group_users
                 and user not in self.settings.qq_allowed_group_users
-                and not (mentioned and is_style_command(content))
+                and not (
+                    mentioned
+                    and (
+                        is_style_command(content)
+                        or (
+                            content.split()
+                            and content.split()[0].lower() == "/auto"
+                            and user in self.settings.qq_control_users
+                        )
+                    )
+                )
             ):
                 return None
             if kind == "group" and mentioned and not content:
@@ -258,8 +275,15 @@ class OneBotAdapter:
                 elif packet.get("post_type") == "message":
                     message = self.normalize(packet)
                     if message:
+                        self.auto.incoming(message)
                         try:
-                            self.queue.put_nowait(message)
+                            target = (
+                                self.urgent
+                                if message.is_mentioned or message.chat_type == "private"
+                                else self.queue
+                            )
+                            target.put_nowait(message)
+                            self.ready.set()
                         except asyncio.QueueFull:
                             logger.warning("qq_queue_full", extra={"fields": {"status": "dropped"}})
         finally:
@@ -272,6 +296,7 @@ class OneBotAdapter:
             if self.settings.qq_group_context_enabled:
                 try:
                     await self.service.observe_group(message)
+                    self.auto.submit(message)
                 except Exception as exc:  # noqa: BLE001 -- ambient messages never trigger replies
                     logger.error(
                         "qq_observe_failed", extra={"fields": {"error_type": type(exc).__name__}}
@@ -283,7 +308,10 @@ class OneBotAdapter:
             return
         destination = message.chat_type + ":" + message.chat_id
         now = time.monotonic()
-        if now - self.last_reply.get(destination, 0) < self.settings.qq_reply_interval_seconds:
+        if (
+            message.text.split()[0].lower() != "/auto"
+            and now - self.last_reply.get(destination, 0) < self.settings.qq_reply_interval_seconds
+        ):
             self.ledger.mark(key, "rate_limited")
             return
         self.last_reply[destination] = now
@@ -308,31 +336,34 @@ class OneBotAdapter:
                 ):
                     message = await self.enrich_members(message)
                 content = (await self.service.handle(message)).text
-            wait = self.settings.qq_reply_interval_seconds - (time.monotonic() - self.last_sent)
-            if wait > 0:
-                await asyncio.sleep(wait)
-            # Mark before sending: disconnect after send may mean it was delivered.
-            # Never automatically resend after an uncertain acknowledgment.
-            self.ledger.mark(key, "delivery_unknown")
-            action = "send_group_msg" if message.chat_type == "group" else "send_private_msg"
-            target = "group_id" if message.chat_type == "group" else "user_id"
-            await self.call(
-                action,
-                {
-                    target: int(message.chat_id),
-                    "message": [
-                        {
-                            "type": "text",
-                            "data": {
-                                "text": content[:2000]
-                                + ("\n（已截断）" if len(content) > 2000 else "")
-                            },
-                        }
-                    ],
-                },
-            )
-            self.last_sent = time.monotonic()
+            async with self.send_lock:
+                wait = self.settings.qq_reply_interval_seconds - (time.monotonic() - self.last_sent)
+                if wait > 0:
+                    await asyncio.sleep(wait)
+                # Mark before sending: disconnect after send may mean it was delivered.
+                # Never automatically resend after an uncertain acknowledgment.
+                self.ledger.mark(key, "delivery_unknown")
+                action = "send_group_msg" if message.chat_type == "group" else "send_private_msg"
+                target = "group_id" if message.chat_type == "group" else "user_id"
+                await self.call(
+                    action,
+                    {
+                        target: int(message.chat_id),
+                        "message": [
+                            {
+                                "type": "text",
+                                "data": {
+                                    "text": content[:2000]
+                                    + ("\n（已截断）" if len(content) > 2000 else "")
+                                },
+                            }
+                        ],
+                    },
+                )
+                self.last_sent = time.monotonic()
             self.ledger.mark(key, "sent")
+            if not message.text.startswith("/"):
+                self.auto.note_reply(message)
             logger.info(
                 "qq_reply_sent",
                 extra={"fields": {"status": "ok", "message_id": message.message_id}},
@@ -342,11 +373,28 @@ class OneBotAdapter:
 
     async def worker(self):
         while True:
-            message = await self.queue.get()
+            if not self.urgent.empty():
+                # Preserve preceding ambient context without running a model or
+                # waiting for an automatic draft ahead of an explicit request.
+                while not self.queue.empty():
+                    ambient = self.queue.get_nowait()
+                    try:
+                        if self.settings.qq_group_context_enabled:
+                            await self.service.observe_group(ambient)
+                    finally:
+                        self.queue.task_done()
+            target = self.urgent if not self.urgent.empty() else self.queue
+            if target.empty():
+                self.ready.clear()
+                await self.ready.wait()
+                continue
+            message = target.get_nowait()
+            self.explicit_busy = message.is_mentioned or message.chat_type == "private"
             try:
                 await self.process(message)
             finally:
-                self.queue.task_done()
+                self.explicit_busy = False
+                target.task_done()
 
     async def session(self, ws):
         self.ws = ws
@@ -366,15 +414,17 @@ class OneBotAdapter:
                 task.result()
         finally:
             self.ws = None
+            await self.auto.close()
             for task in (receiver, worker):
                 if task:
                     task.cancel()
                     with suppress(asyncio.CancelledError, OneBotError):
                         await task
             # Do not replay connection-local queued messages after reconnect.
-            while not self.queue.empty():
-                self.queue.get_nowait()
-                self.queue.task_done()
+            for queue in (self.queue, self.urgent):
+                while not queue.empty():
+                    queue.get_nowait()
+                    queue.task_done()
 
     async def run(self):
         self.settings.require_qq()

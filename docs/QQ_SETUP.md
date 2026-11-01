@@ -35,6 +35,8 @@ QQ_LIVE_ENABLED=false
 
 ## 启用与验证
 
+选择性接话默认off，管理者在 `.env` 填写 `QQ_CONTROL_USERS=["管理者QQ号"]` 后重启；群内@使用 `/auto shadow` 观察、`/auto on`启用、`/auto off`关闭。与/style全体成员权限分开，详见 [选择性接话](SELECTIVE_REPLY.md)。
+
 先登录 NapCat，并确认授权与告知，再将 `QQ_LIVE_ENABLED=true`。关闭占用同一数据库的其他 Agent 后执行：
 
 ```powershell
