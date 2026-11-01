@@ -59,6 +59,11 @@ CREATE TABLE IF NOT EXISTS memory_sources (
  source_user_id TEXT NOT NULL, source_message_id TEXT NOT NULL,
  event TEXT NOT NULL, created_at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS purge_queue (thread_id TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS image_requests (
+ thread_id TEXT NOT NULL,message_id TEXT NOT NULL,chat_type TEXT NOT NULL,chat_id TEXT NOT NULL,
+ user_id TEXT NOT NULL,created_at REAL NOT NULL,pid TEXT,
+ PRIMARY KEY(thread_id,message_id));
+CREATE INDEX IF NOT EXISTS image_request_limits ON image_requests(chat_type,chat_id,created_at);
 CREATE TABLE IF NOT EXISTS auto_settings (
  group_id TEXT PRIMARY KEY,mode TEXT NOT NULL DEFAULT 'off',cooldown INTEGER NOT NULL DEFAULT 90,
  hourly_limit INTEGER NOT NULL DEFAULT 6);
@@ -93,7 +98,7 @@ CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
  INSERT INTO messages_fts(rowid,content) VALUES(new.id,new.content); END;
 CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
  DELETE FROM messages_fts WHERE rowid=old.id; END;
-PRAGMA user_version=4;
+PRAGMA user_version=5;
 """
 
 
@@ -106,7 +111,7 @@ class Database:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA secure_delete=ON")
         version = self.conn.execute("PRAGMA user_version").fetchone()[0]
-        if version > 4:
+        if version > 5:
             self.conn.close()
             raise ValueError("数据库版本较新，请升级程序")
         self.conn.executescript(SCHEMA)
@@ -540,6 +545,7 @@ class Database:
         cutoff = now - days * 86400
         with self.transaction() as db:
             db.execute("DELETE FROM auto_events WHERE created_at<=?", (cutoff,))
+            db.execute("DELETE FROM image_requests WHERE created_at<=?", (cutoff,))
             groups = db.execute(
                 "SELECT DISTINCT platform,chat_id FROM group_context_messages "
                 "WHERE created_at<=? AND tombstone=0",

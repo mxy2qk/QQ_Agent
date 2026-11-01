@@ -13,6 +13,7 @@ import httpx
 from bs4 import BeautifulSoup
 from pydantic import Field
 
+from qq_agent.pixiv_images import PixivImages
 from qq_agent.tools import Tool, ToolArguments, ToolFailure
 
 
@@ -71,6 +72,7 @@ class PublicSources:
     ALLOWED = frozenset({"api.bilibili.com", "tieba.baidu.com"})
 
     def __init__(self, settings, client=None):
+        self.pixiv = PixivImages(settings)
         self.enabled = settings.public_sources_enabled
         self.interval = settings.source_interval_seconds
         self.client = client or httpx.AsyncClient(
@@ -83,6 +85,7 @@ class PublicSources:
 
     async def close(self):
         await self.client.aclose()
+        await self.pixiv.close()
 
     async def _fetch(self, url, params=None):
         u = urlsplit(url)
@@ -276,6 +279,7 @@ class PublicSources:
         }
 
     def register(self, registry):
+        self.pixiv.register(registry)
         for name, description, arguments, handler in [
             (
                 "get_bilibili_hot_videos",

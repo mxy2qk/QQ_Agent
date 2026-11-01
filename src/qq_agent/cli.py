@@ -87,6 +87,7 @@ async def run(args, log_handler=None):
             else await resources.enter_async_context(open_persistence(settings))
         )
         service = AgentService(client, registry, settings, persistence, manager)
+        service.image_source = sources.pixiv
 
         async def periodic_cleanup():
             while True:

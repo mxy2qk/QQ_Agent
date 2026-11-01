@@ -15,8 +15,9 @@ from qq_agent.memory import MemoryManager, memory_context
 from qq_agent.messages import IncomingMessage
 from qq_agent.model import LLMClient, is_interruption_marker
 from qq_agent.observability import request_context
+from qq_agent.pixiv_images import query_tags
 from qq_agent.style import DEFAULT_STYLE, is_style_command, reply_style_context, style_command
-from qq_agent.tools import ToolRegistry
+from qq_agent.tools import ToolFailure, ToolRegistry
 
 logger = logging.getLogger("qq_agent")
 
@@ -27,6 +28,7 @@ class AgentReply:
     status: str
     tool_calls: int = 0
     model_steps: int = 0
+    image_id: str | None = None
 
 
 @dataclass
@@ -48,6 +50,7 @@ class AgentService:
         self.settings = settings
         self.client = client
         self.auto_controller = None
+        self.image_source = None
         self.registry = registry
         self.skill_manager = skill_manager
         self.persistence = persistence
@@ -106,6 +109,8 @@ class AgentService:
         started = time.monotonic()
         session = self.sessions.setdefault(message.thread_id, Session())
         async with session.lock:
+            if message.text.split()[0].lower() == "/tag":
+                return await self._handle_tag(message, session)
             if message.text.split()[0].lower() == "/auto" and self.auto_controller:
                 return self.auto_controller.command(message)
             help_text = command_help(
@@ -251,6 +256,90 @@ class AgentService:
             )
             return reply
 
+    async def _handle_tag(self, message, session):
+        allowed = message.platform == "cli" or (
+            message.platform == "qq"
+            and (
+                (
+                    message.chat_type == "group"
+                    and message.is_mentioned
+                    and message.chat_id in self.settings.qq_allowed_groups
+                    and (
+                        not self.settings.qq_allowed_group_users
+                        or message.user_id in self.settings.qq_allowed_group_users
+                    )
+                )
+                or (
+                    message.chat_type == "private"
+                    and self.settings.qq_private_enabled
+                    and message.user_id in self.settings.qq_allowed_users
+                )
+            )
+        )
+        if not allowed:
+            return AgentReply("请在授权群内@，或通过授权好友私聊使用/tag。", "error")
+        if not self.database or not self.image_source or not self.image_source.enabled:
+            return AgentReply("Pixiv图片功能尚未启用，或当前模式不支持图片。", "error")
+        cached = self.database.reply(message)
+        if cached:
+            return AgentReply(**cached)
+        tags = (
+            message.text.split(maxsplit=1)[1]
+            if len(message.text.split(maxsplit=1)) == 2
+            else "风景"
+        )
+        try:
+            query_tags(tags)
+        except ToolFailure as exc:
+            return AgentReply(str(exc), "error")
+        import time as clock
+
+        now = clock.time()
+        user_key, chat_key = (
+            message.platform + ":" + message.user_id,
+            message.platform + ":" + message.chat_id,
+        )
+        db = self.database.conn
+        if db.execute(
+            "SELECT 1 FROM image_requests WHERE user_id=? AND created_at>?", (user_key, now - 30)
+        ).fetchone():
+            return AgentReply("抽图冷却中，30秒后再试。", "error")
+        count = db.execute(
+            "SELECT COUNT(*) FROM image_requests WHERE chat_type=? AND chat_id=? AND created_at>?",
+            (message.chat_type, chat_key, now - 3600),
+        ).fetchone()[0]
+        if count >= 20:
+            return AgentReply("当前会话本小时抽图次数已达20次。", "error")
+        excluded = [
+            r[0]
+            for r in db.execute(
+                "SELECT pid FROM image_requests WHERE chat_type=? AND chat_id=? AND created_at>? AND pid IS NOT NULL",
+                (message.chat_type, chat_key, now - 7 * 86400),
+            )
+        ]
+        self.database.touch(message)
+        with self.database.transaction() as conn:
+            conn.execute(
+                "INSERT INTO image_requests VALUES(?,?,?,?,?,?,NULL)",
+                (message.thread_id, message.message_id, message.chat_type, chat_key, user_key, now),
+            )
+        try:
+            work = await self.image_source.pick(tags, excluded)
+            caption = "作者：" + work["author"][:12] + "\n" + work["source_url"]
+            reply = AgentReply(caption, "ok", image_id=work["image_id"])
+            with self.database.transaction() as conn:
+                conn.execute(
+                    "UPDATE image_requests SET pid=? WHERE thread_id=? AND message_id=?",
+                    (work["pid"], message.thread_id, message.message_id),
+                )
+        except ToolFailure as exc:
+            reply = AgentReply(str(exc), "error")
+        except Exception as exc:  # noqa: BLE001 -- image/transport exception data stays local
+            logger.warning("tag_failed", extra={"fields": {"error_type": type(exc).__name__}})
+            reply = AgentReply("图片暂时获取失败，请稍后换个标签再试。", "error")
+        self.database.complete(message, self.database.turns(message), asdict(reply))
+        return reply
+
     def _handle_style(self, message, session):
         allowed = message.platform == "cli" or (
             message.platform == "qq"
@@ -310,6 +399,14 @@ class AgentService:
             async with self.persistence.lock:
                 purged = await self.persistence.cleanup()
                 self._clear_cached_threads(purged)
+        if self.image_source and self.image_source.enabled:
+            try:
+                self.image_source.cleanup()
+            except OSError as exc:
+                logger.warning(
+                    "pixiv_cache_cleanup_failed",
+                    extra={"fields": {"error_type": type(exc).__name__}},
+                )
 
     def _clear_cached_threads(self, thread_ids):
         for thread_id in thread_ids:

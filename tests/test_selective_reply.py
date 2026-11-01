@@ -331,7 +331,7 @@ def test_v3_migration_preserves_existing_data(tmp_path):
     db.close()
     db = Database(path)
     try:
-        assert db.conn.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert db.conn.execute("PRAGMA user_version").fetchone()[0] == 5
         assert db.visible(msg())[0]["id"] == mid
         assert db.conn.execute("SELECT COUNT(*) FROM auto_settings").fetchone()[0] == 0
         assert db.conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"

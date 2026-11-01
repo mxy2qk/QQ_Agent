@@ -1,6 +1,7 @@
 """OneBot 11 forward WS. The model cannot choose send actions or recipients."""
 
 import asyncio
+import base64
 import json
 import logging
 import time
@@ -315,6 +316,7 @@ class OneBotAdapter:
             self.ledger.mark(key, "rate_limited")
             return
         self.last_reply[destination] = now
+        image_id = None
         try:
             # Group responses are public. Private/global memories and private
             # management commands must never be published to a whole group.
@@ -335,7 +337,30 @@ class OneBotAdapter:
                     and not message.text.startswith(("/", "记住"))
                 ):
                     message = await self.enrich_members(message)
-                content = (await self.service.handle(message)).text
+                reply = await self.service.handle(message)
+                content = reply.text
+                image_id = getattr(reply, "image_id", None)
+            segments = [
+                {
+                    "type": "text",
+                    "data": {
+                        "text": content[:2000] + ("\n（已截断）" if len(content) > 2000 else "")
+                    },
+                }
+            ]
+            if image_id:
+                try:
+                    raw = self.service.image_source.load(image_id)
+                    segments.append(
+                        {
+                            "type": "image",
+                            "data": {"file": "base64://" + base64.b64encode(raw).decode("ascii")},
+                        }
+                    )
+                except Exception:  # noqa: BLE001 -- do not expose local paths or resend expired media
+                    segments = [
+                        {"type": "text", "data": {"text": "图片缓存已失效，请重新/tag 标签。"}}
+                    ]
             async with self.send_lock:
                 wait = self.settings.qq_reply_interval_seconds - (time.monotonic() - self.last_sent)
                 if wait > 0:
@@ -349,15 +374,7 @@ class OneBotAdapter:
                     action,
                     {
                         target: int(message.chat_id),
-                        "message": [
-                            {
-                                "type": "text",
-                                "data": {
-                                    "text": content[:2000]
-                                    + ("\n（已截断）" if len(content) > 2000 else "")
-                                },
-                            }
-                        ],
+                        "message": segments,
                     },
                 )
                 self.last_sent = time.monotonic()

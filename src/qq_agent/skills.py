@@ -68,6 +68,8 @@ class SkillManager:
             return [name]
         lowered = text.lower()
         names = []
+        if lowered.split() and lowered.split()[0] == "/tag":
+            names.append("pixiv-random")
         if any(k in lowered for k in ("贴吧", "神贴", "神帖", "tieba.baidu.com")):
             names.append("tieba-hot")
         if any(k in lowered for k in ("b站", "b 站", "哔哩", "bilibili", "bv1")):

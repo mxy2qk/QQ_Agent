@@ -17,6 +17,7 @@ dependencies = [
   "beautifulsoup4>=4.12,<5",
   "PyYAML>=6,<7",
   "websockets>=15,<18",
+  "pillow>=12,<13",
 ]
 
 [project.optional-dependencies]

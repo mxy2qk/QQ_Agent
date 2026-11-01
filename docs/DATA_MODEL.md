@@ -2,7 +2,7 @@
 
 记忆ID是稳定的全库主键，不因删除而重置或复用，不表示当前用户的列表位置。界面单独显示从1开始的连续序号；修改/删除等命令仍使用明确标记的ID。筛选后的结果也重新从1编号。历史命令引用已删除ID时应拒绝，不能改指向新记忆。
 
-业务库 `DATABASE_PATH` 与 LangGraph 库 `CHECKPOINT_DB_PATH` 分开存储，禁止指向同一文件。SQLite WAL + 外键 + secure_delete；启动按 `PRAGMA user_version` 应用幂等 v4 Schema，兼容从v1/v2/v3升级，遇到高版本拒绝打开。FTS5 trigram 用于中英文子串全文检索，少于三字符使用参数化 `instr`。
+业务库 `DATABASE_PATH` 与 LangGraph 库 `CHECKPOINT_DB_PATH` 分开存储，禁止指向同一文件。SQLite WAL + 外键 + secure_delete；启动按 `PRAGMA user_version` 应用幂等 v5 Schema，兼容旧版升级，遇到高版本拒绝打开。FTS5 trigram 用于中英文子串全文检索，少于三字符使用参数化 `instr`。
 
 | 表 | 用途 |
 | --- | --- |
@@ -18,6 +18,7 @@
 | group_context_messages | 明确启用后的授权群文字摘录、发送者QQ号与群显示名；按群与成员过滤、默认7天，清除后保留无正文去重标记 |
 | reply_style_settings | 当前单条全局风格微调，所有群聊与私聊共用，作为配置持续保留；基础规则和默认人格来自代码，恢复默认时删除微调记录 |
 | auto_settings / auto_events / auto_status | 逐群选择性接话模式与频控、滚动额度和去重、最近固定状态；事件按保留期清理，配置独立保留 |
+| image_requests | /tag请求的冷却、小时限额、会话去重及作品ID；图片字节单独放在24小时缓存，不进入会话或Checkpoint |
 
 权限 SQL 必须同时匹配平台、所有者、当前 chat_type/chat_id 和 scope。private 只对所属用户在原会话可见；group 只对同平台该群的观察成员可见；global 只对同平台同一稳定用户可见。跨平台身份关联尚未实现，不能按昵称或同名 ID 合并。群组记忆有创建者所有权，其他成员可读取，不能修改或删除。
 

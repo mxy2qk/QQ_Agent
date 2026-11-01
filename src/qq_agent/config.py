@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     message_retention_days: int = Field(default=7, ge=1, le=3650)
     memory_extraction_enabled: bool = True
     public_sources_enabled: bool = False
+    pixiv_images_enabled: bool = False
+    pixiv_cache_dir: str = "data/pixiv-cache"
     source_timeout_seconds: float = Field(default=15, gt=0, le=60)
     source_interval_seconds: float = Field(default=2, ge=1, le=60)
     qq_ws_url: str = ""

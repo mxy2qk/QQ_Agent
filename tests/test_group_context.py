@@ -294,7 +294,7 @@ def test_schema_v1_upgrades_without_removing_existing_data(tmp_path):
     db.close()
     db = Database(path)
     try:
-        assert db.conn.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert db.conn.execute("PRAGMA user_version").fetchone()[0] == 5
         assert db.conn.execute("SELECT group_id FROM groups").fetchone()[0] == "100"
         assert db.conn.execute("SELECT COUNT(*) FROM group_context_messages").fetchone()[0] == 0
         assert db.conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"

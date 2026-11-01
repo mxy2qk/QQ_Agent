@@ -14,6 +14,12 @@ class Command:
 
 COMMANDS = (
     Command(
+        "tag",
+        "/tag [标签]",
+        "按标签随机来一张Pixiv非露骨插画",
+        "例如/tag 风景、/tag 初音未来；最多5个标签，空标签默认风景。一次一张，附作者与作品链接，只用公开全年龄非AI静态插画，受限时提示失败。每人30秒、每会话每小时20次，7天内尽量不重复。",
+    ),
+    Command(
         "auto",
         "/auto [status|shadow|on|off|cooldown 秒|limit 次数]",
         "查看或管理选择性接话",
@@ -142,7 +148,7 @@ def command_help(text, message, settings, skill_manager=None, persistent=True):
         item
         for item in COMMANDS
         if item.scope in {"both", scope}
-        and (topic != "memory" or item.name not in {"help", "skill", "style", "auto"})
+        and (topic != "memory" or item.name not in {"help", "skill", "style", "auto", "tag"})
     ]
     title = "群聊操作帮助" if group else "私聊/CLI操作帮助"
     intro = (

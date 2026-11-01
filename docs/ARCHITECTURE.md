@@ -19,7 +19,8 @@ CLI Adapter → IncomingMessage → AgentService → LangGraph
 - `conversation.py`：请求级QQ身份、群成员昵称/名片、授权群摘录注入；只提供当前场景允许的数据，不把注入材料保存到State。
 - `cli.py`：终端输入输出、单条消息与真实 API 验证入口。
 - `observability.py`：ContextVar 请求关联、JSON 日志、文件轮转。
-- `storage.py`：SQLite v4 Schema、身份/消息/授权记录、权限化记忆 CRUD、FTS5、授权群文字摘录、全局回复风格、主动接话状态和清理队列。
+- `storage.py`：SQLite v5 Schema、身份/消息/授权记录、权限化记忆 CRUD、FTS5、授权群文字摘录、全局回复风格、主动接话、抽图限额和清理队列。
+- `pixiv_images.py`：固定公开图源、非露骨元数据过滤、robots与限速、图片文件校验和受控缓存。AgentReply.image_id仅由/tag程序路径产生，渠道验证后渲染图片段。
 - `selective_reply.py`：默认关闭的选择性接话、管理命令、独立任务、滚动预算、公开快照与发送前复核；不向模型开放工具。
 - `style.py`：默认群友风格、本地/style命令及请求级风格提示词。仅一个全局设置，加载自数据库或内置默认，不作为用户私有记忆。
 - `memory.py`：明确指令提取、授权记忆检索、记忆管理命令与请求级注入上下文。

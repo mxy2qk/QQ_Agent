@@ -252,7 +252,7 @@ def test_v2_database_upgrades_to_v3_without_losing_existing_memories(tmp_path):
     db.close()
     db = Database(path)
     try:
-        assert db.conn.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert db.conn.execute("PRAGMA user_version").fetchone()[0] == 5
         assert db.visible(actor)[0]["content"] == "动画"
         assert db.reply_style() is None
         assert db.conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
